@@ -5,9 +5,9 @@
 //
 // HD: actors render at pixel density 2 and the map view renders two pixels per map unit (camera zoom), so
 // every sprite texel is one view pixel and HD detail and outlines survive. The zoom magnifies that view by
-// whole numbers - 2, 4, 6 or 8 screen pixels per map unit - so pixels stay crisp; ground and terrain
-// textures have one texel per map unit and appear twice as coarse as the sprites. --density=1 renders
-// classic sprites with zoom steps of 1 to 8 screen pixels per map unit.
+// whole numbers - 2, 4, 6 or 8 screen pixels per map unit - so pixels stay crisp. The ground matches: the
+// map's images (ground, water, cliff faces, glints, classic props) have two texels per map unit as well.
+// --density=1 renders classic sprites and the classic ground with zoom steps of 1 to 8.
 //
 // Scenery: by default the trees, bushes and rocks are flora and prop creations (stationary actors that
 // sway in the wind at a low animation rate, same pixel density as the creatures); the classic style shows
@@ -76,7 +76,7 @@ namespace PixelCreatures.Workshop
         private Task<TestMap>? _mapTask;
         private CancellationTokenSource? _mapCancel;
         private readonly List<Sprite2D> _propSprites = new List<Sprite2D>();
-        private readonly List<(Sprite2D Sprite, ImageTexture[] Frames)> _ponds = new List<(Sprite2D, ImageTexture[])>();
+        private readonly List<PondGlints> _ponds = new List<PondGlints>();
         private readonly List<ImageTexture> _mapTextures = new List<ImageTexture>();
         private ImageTexture? _minimapTexture;
         private CreatureActor? _player;
@@ -247,7 +247,7 @@ namespace PixelCreatures.Workshop
             _minimap = new TestAreaMinimap { Area = this };
             AddChild(_minimap);
             var size = MapSize.All[_mapIndex];
-            ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, _mapSeed, default, _sceneryStyle));
+            ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, _mapSeed, default, _sceneryStyle, _density));
 
             SpawnPlayer(TestAreaLauncher.PendingGenome ?? CreatureRuntime.Sample("quadruped", 7));
             SetPopulation(population);
@@ -391,14 +391,16 @@ namespace PixelCreatures.Workshop
             var size = MapSize.All[_mapIndex];
             ulong seed = _mapSeed;
             var style = _sceneryStyle;
+            // the ground images match the sprites: HD density, HD ground
+            int resolution = _density;
             if (immediate)
             {
-                ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, seed, default, style));
+                ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, seed, default, style, resolution));
                 return;
             }
             var cancel = new CancellationTokenSource();
             _mapCancel = cancel;
-            _mapTask = Task.Run(() => EnvironmentArt.GenerateMap(size.Width, size.Height, seed, cancel.Token, style), cancel.Token);
+            _mapTask = Task.Run(() => EnvironmentArt.GenerateMap(size.Width, size.Height, seed, cancel.Token, style, resolution), cancel.Token);
             UpdateMapUi();
         }
 
@@ -418,22 +420,31 @@ namespace PixelCreatures.Workshop
             var old = _map;
             ReleaseMap();
             _map = map;
-            _ground.Texture = MapTexture(map.GroundRgba, map.Width, map.Height);
-            _waterSurface.Texture = MapTexture(map.WaterSurfaceRgba, map.Width, map.Height);
+            // the images have map.Resolution texels per map unit: drawn at 1/resolution, one texel is one view pixel
+            int res = map.Resolution;
+            var texel = new Vector2(1f / res, 1f / res);
+            _ground.Texture = MapTexture(map.GroundRgba, map.TexWidth, map.TexHeight);
+            _ground.Scale = texel;
+            _waterSurface.Texture = MapTexture(map.WaterSurfaceRgba, map.TexWidth, map.TexHeight);
+            _waterSurface.Scale = texel;
             foreach (var face in map.Cliffs)
             {
-                var cliff = new Sprite2D { Centered = false, Texture = MapTexture(face.Rgba, face.Width, face.Height), Position = new Vector2(face.X, face.Y), Offset = new Vector2(0, -face.Height) };
+                // the bottom edge is the sort key: a cliff hides what stands behind it, not what stands in front
+                var cliff = new Sprite2D
+                {
+                    Centered = false, Texture = MapTexture(face.Rgba, face.Width, face.Height), Scale = texel,
+                    Position = new Vector2(face.X, face.Y) / res, Offset = new Vector2(0, -face.Height),
+                };
                 _entities.AddChild(cliff);
                 _propSprites.Add(cliff);
             }
             foreach (var pond in map.Ponds)
             {
-                var b = pond.Bounds;
-                if (b.Size.X <= 0 || b.Size.Y <= 0 || pond.GlintFrames.Length == 0) continue;
-                var frames = pond.GlintFrames.Select(f => MapTexture(f, b.Size.X, b.Size.Y)).ToArray();
-                var sprite = new Sprite2D { Centered = false, Position = b.Position, Texture = frames[0] };
-                _waterLayer.AddChild(sprite);
-                _ponds.Add((sprite, frames));
+                if (pond.GlintFrames.Length == 0) continue;
+                var glints = new PondGlints();
+                glints.SetGlints(pond.GlintFrames, res);
+                _waterLayer.AddChild(glints);
+                _ponds.Add(glints);
             }
             _waterFrame = -1;
             // procedural scenery: actors are created over the next frames, nearest to the camera first
@@ -444,14 +455,14 @@ namespace PixelCreatures.Workshop
             if (_sceneryQueue.Count < map.Props.Count)
             {
                 var rng = new Rng(map.Seed ^ 0x56415249UL);
-                var trees = PropVariants(PropKind.Tree, EnvironmentArt.TreeVariants, rng);
-                var bushes = PropVariants(PropKind.Bush, EnvironmentArt.BushVariants, rng);
-                var rocks = PropVariants(PropKind.Rock, EnvironmentArt.RockVariants, rng);
+                var trees = PropVariants(PropKind.Tree, EnvironmentArt.TreeVariants, rng, res);
+                var bushes = PropVariants(PropKind.Bush, EnvironmentArt.BushVariants, rng, res);
+                var rocks = PropVariants(PropKind.Rock, EnvironmentArt.RockVariants, rng, res);
                 foreach (var p in map.Props)
                 {
                     if (map.SceneryOf(p) != null) continue;
                     var v = p.Kind == PropKind.Tree ? trees[p.Variant] : (p.Kind == PropKind.Bush ? bushes[p.Variant] : rocks[p.Variant]);
-                    var s = new Sprite2D { Texture = v.Texture, Centered = false, Offset = -new Vector2(v.Origin.X, v.Origin.Y), Position = map.Project(new Vector2(p.X, p.Y)) };
+                    var s = new Sprite2D { Texture = v.Texture, Centered = false, Scale = texel, Offset = -new Vector2(v.Origin.X, v.Origin.Y), Position = map.Project(new Vector2(p.X, p.Y)) };
                     _entities.AddChild(s);
                     _propSprites.Add(s);
                 }
@@ -460,6 +471,8 @@ namespace PixelCreatures.Workshop
             _camera.LimitBottom = map.Height;
             _minimapTexture = MapTexture(map.MiniRgba, map.MiniWidth, map.MiniHeight);
             _minimap.SetMap(_minimapTexture, map.MiniWidth, map.MiniHeight);
+            // the images are on the GPU now; an HD map of the largest size would otherwise keep 100+ MB of them
+            map.ReleaseImages();
             if (old != null) RelocateCreatures(old);
             Relayout();
             UpdateMapUi();
@@ -474,16 +487,17 @@ namespace PixelCreatures.Workshop
             return tex;
         }
 
-        private (ImageTexture Texture, Vector2I Origin)[] PropVariants(PropKind kind, int count, Rng rng)
+        /// <summary>Static prop textures; at resolution 2 the art is painted at twice the size and drawn at half scale (HD).</summary>
+        private (ImageTexture Texture, Vector2I Origin)[] PropVariants(PropKind kind, int count, Rng rng, int res)
         {
             var list = new (ImageTexture, Vector2I)[count];
             for (int i = 0; i < count; i++)
             {
                 Image img;
                 Vector2I origin;
-                if (kind == PropKind.Tree) img = EnvironmentArt.Tree(rng.NextULong(), out origin, rng.Range(0.85, 1.2));
-                else if (kind == PropKind.Bush) img = EnvironmentArt.Bush(rng.NextULong(), out origin, rng.Range(0.8, 1.2));
-                else img = EnvironmentArt.Rock(rng.NextULong(), out origin, rng.Range(0.7, 1.3));
+                if (kind == PropKind.Tree) img = EnvironmentArt.Tree(rng.NextULong(), out origin, rng.Range(0.85, 1.2) * res);
+                else if (kind == PropKind.Bush) img = EnvironmentArt.Bush(rng.NextULong(), out origin, rng.Range(0.8, 1.2) * res);
+                else img = EnvironmentArt.Rock(rng.NextULong(), out origin, rng.Range(0.7, 1.3) * res);
                 var tex = ImageTexture.CreateFromImage(img);
                 img.Dispose();
                 _mapTextures.Add(tex);
@@ -500,7 +514,7 @@ namespace PixelCreatures.Workshop
             foreach (var s in _scenery) if (IsInstanceValid(s.Actor)) s.Actor.QueueFree();
             _scenery.Clear();
             _sceneryQueue.Clear();
-            foreach (var (sprite, _) in _ponds) if (IsInstanceValid(sprite)) sprite.QueueFree();
+            foreach (var glints in _ponds) if (IsInstanceValid(glints)) glints.QueueFree();
             _ponds.Clear();
             if (IsInstanceValid(_ground)) _ground.Texture = null;
             if (IsInstanceValid(_waterSurface)) _waterSurface.Texture = null;
@@ -924,7 +938,7 @@ namespace PixelCreatures.Workshop
             if (wf != _waterFrame)
             {
                 _waterFrame = wf;
-                foreach (var (sprite, frames) in _ponds) sprite.Texture = frames[wf];
+                foreach (var glints in _ponds) glints.Frame = wf;
             }
             if (_minimap.Visible) _minimap.QueueRedraw();
             UpdateHud();

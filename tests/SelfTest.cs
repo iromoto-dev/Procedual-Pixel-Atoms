@@ -327,15 +327,17 @@ namespace PixelCreatures.Tests
         }
 
         /// <summary>
-        /// Map generator of the test area: every size preset has water, sand, paths and props at the expected
-        /// density on suitable ground; generation is deterministic, differs per seed and can be cancelled.
+        /// Map generator of the test area (HD images, like the test area uses them): every size preset has water, sand,
+        /// paths and props at the expected density on suitable ground; generation is deterministic, differs per seed and
+        /// can be cancelled. The image resolution changes only the images: the logical layers are the same at 1 and 2.
         /// </summary>
         private Task TestAreaMaps(TestContext ctx)
         {
+            const int hd = TestArea.DefaultPixelDensity;
             foreach (var size in MapSize.All)
             {
                 var sw = Stopwatch.StartNew();
-                var map = EnvironmentArt.GenerateMap(size.Width, size.Height, 9001);
+                var map = EnvironmentArt.GenerateMap(size.Width, size.Height, 9001, default, SceneryStyle.Procedural, hd);
                 ctx.Metric($"generateMs_{size.Width}x{size.Height}", Math.Round(sw.Elapsed.TotalMilliseconds, 1));
                 double water = map.Fraction(TestMap.Water), sand = map.Fraction(TestMap.Sand), path = map.Fraction(TestMap.Path);
                 ctx.Metric($"water_{size.Width}x{size.Height}", Math.Round(water, 4));
@@ -351,7 +353,9 @@ namespace PixelCreatures.Tests
                     {
                         var p = new Vector2(x, y);
                         int index = y * map.Width + x;
-                        ctx.True(map.WaterSurfaceRgba[index * 4 + 3] > 0 == map.IsWater(x, y), "surface sheet only covers water");
+                        // texel (hd*x, hd*y) samples exactly the point of cell (x, y)
+                        int texel = y * hd * map.TexWidth + x * hd;
+                        ctx.True(map.WaterSurfaceRgba[texel * 4 + 3] > 0 == map.IsWater(x, y), "surface sheet only covers water");
                         if (map.CanOccupy(p, true, false, 24))
                         {
                             safeWater++;
@@ -372,25 +376,41 @@ namespace PixelCreatures.Tests
                 foreach (var p in map.Props)
                     ctx.True(map.Terrain[p.Y * map.Width + p.X] == TestMap.Grass, $"{size}: prop at {p.X},{p.Y} not on grass");
                 CheckScenery(ctx, map, size.ToString());
+                CheckGroundImages(ctx, map, size.ToString());
                 ctx.True(map.Ponds.Count >= Math.Max(1, (int)Math.Round(size.Width * (double)size.Height / 300000.0) - 1), $"{size}: only {map.Ponds.Count} ponds");
                 foreach (var pond in map.Ponds)
                 {
                     var b = pond.Bounds;
                     ctx.True(b.Position.X >= 0 && b.Position.Y >= 0 && b.End.X <= map.Width && b.End.Y <= map.Height, $"{size}: pond bounds {b} outside the map");
-                    ctx.True(pond.GlintFrames.Length == 4 && pond.GlintFrames.All(f => f.Length == b.Size.X * b.Size.Y * 4), $"{size}: glint frames");
+                    var tb = new Rect2I(b.Position * hd, b.Size * hd);
+                    ctx.True(pond.GlintFrames.Length == 4 && pond.GlintFrames.Sum(f => f.Length) > 0
+                             && pond.GlintFrames.All(f => f.All(g => tb.HasPoint(new Vector2I(g.X, g.Y)) && g.X + g.Length <= tb.End.X && g.Length > 0)),
+                        $"{size}: four frames of glints inside the pond");
                 }
                 ctx.True(map.MiniWidth > 0 && map.MiniWidth <= EnvironmentArt.MinimapMaxWidth && map.MiniHeight <= EnvironmentArt.MinimapMaxHeight
                          && map.MiniRgba.Length == map.MiniWidth * map.MiniHeight * 4, $"{size}: minimap {map.MiniWidth}x{map.MiniHeight}");
             }
-            var a = EnvironmentArt.GenerateMap(960, 600, 77);
-            var b2 = EnvironmentArt.GenerateMap(960, 600, 77);
+            var a = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Procedural, hd);
+            var b2 = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Procedural, hd);
             ctx.True(a.GroundRgba.AsSpan().SequenceEqual(b2.GroundRgba) && a.Terrain.AsSpan().SequenceEqual(b2.Terrain) && a.Props.Count == b2.Props.Count,
                 "the same seed must produce the same map (parallel generation)");
             ctx.True(a.Elevation.AsSpan().SequenceEqual(b2.Elevation) && a.Clearance.AsSpan().SequenceEqual(b2.Clearance), "height and navigation are deterministic");
             ctx.True(a.Props.Select(p => (a.SceneryOf(p)?.Genome.ContentHash, p.Facing, p.Phase)).SequenceEqual(b2.Props.Select(p => (b2.SceneryOf(p)?.Genome.ContentHash, p.Facing, p.Phase))),
                 "scenery creations, facings and wind phases are deterministic");
+            ctx.True(a.WaterSurfaceRgba.AsSpan().SequenceEqual(b2.WaterSurfaceRgba) && a.Cliffs.Count == b2.Cliffs.Count && a.Cliffs.Zip(b2.Cliffs).All(f => f.First.Rgba.AsSpan().SequenceEqual(f.Second.Rgba))
+                     && a.Ponds.Zip(b2.Ponds).All(p => p.First.GlintFrames.Zip(p.Second.GlintFrames).All(f => f.First.AsSpan().SequenceEqual(f.Second))),
+                "HD images (water surface, cliff faces, glints) are deterministic");
+            // classic images: the logical layers - everything navigation and creatures use - do not depend on the resolution
+            var a1 = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Procedural, 1);
+            ctx.True(a1.Resolution == 1 && a1.GroundRgba.Length == a1.Width * a1.Height * 4, "resolution 1: classic images");
+            ctx.True(a1.Terrain.AsSpan().SequenceEqual(a.Terrain) && a1.Elevation.AsSpan().SequenceEqual(a.Elevation) && a1.WaterDepth.AsSpan().SequenceEqual(a.WaterDepth)
+                     && a1.Clearance.AsSpan().SequenceEqual(a.Clearance), "terrain, elevation, water depth and clearance are the same at every image resolution");
+            ctx.True(a1.Props.Select(p => (p.X, p.Y, p.Kind, p.Facing, a1.SceneryOf(p)?.Genome.ContentHash)).SequenceEqual(a.Props.Select(p => (p.X, p.Y, p.Kind, p.Facing, a.SceneryOf(p)?.Genome.ContentHash))),
+                "props and scenery are the same at every image resolution");
+            ctx.True(a1.Cliffs.Count == a.Cliffs.Count && a1.Cliffs.Zip(a.Cliffs).All(f => f.Second.X == f.First.X * hd && f.Second.Width == f.First.Width * hd && Math.Abs(f.Second.Y - f.First.Y * hd) < hd),
+                "HD cliff faces cover the same strips, sorted by the same bottom edge");
             // the classic style keeps the layout and the ground, with static textures and their small square footprints
-            var classic = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Classic);
+            var classic = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Classic, hd);
             ctx.True(classic.Style == SceneryStyle.Classic && classic.Scenery.Count == 0 && classic.Props.All(p => classic.SceneryOf(p) == null), "classic style: static props only");
             ctx.True(classic.Props.Select(p => (p.X, p.Y, p.Kind, p.Variant)).SequenceEqual(a.Props.Select(p => (p.X, p.Y, p.Kind, p.Variant))) && classic.GroundRgba.AsSpan().SequenceEqual(a.GroundRgba),
                 "scenery style changes the props, not the layout or the ground");
@@ -408,6 +428,40 @@ namespace PixelCreatures.Tests
             catch (OperationCanceledException) { cancelled = true; }
             ctx.True(cancelled, "canceled generation must throw OperationCanceledException");
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Image layers of a map at its resolution: sizes match the texel grid, cliff faces sit on whole map cells, and an
+        /// HD ground has real texel detail - shorelines, paths, colour noise and grass drawn per texel, not an upscale of
+        /// the classic image (an upscale would have no 2×2 block with differing texels).
+        /// </summary>
+        private static void CheckGroundImages(TestContext ctx, TestMap map, string label)
+        {
+            int r = map.Resolution, tw = map.TexWidth, th = map.TexHeight;
+            ctx.True(tw == map.Width * r && th == map.Height * r && map.GroundRgba.Length == tw * th * 4 && map.WaterSurfaceRgba.Length == tw * th * 4,
+                $"{label}: images of {tw}x{th} texels at resolution {r}");
+            ctx.True(map.Cliffs.All(f => f.X % r == 0 && f.Width % r == 0 && f.Rgba.Length == f.Width * f.Height * 4 && f.Y <= th),
+                $"{label}: cliff faces on the texel grid");
+            if (r == 1) return;
+            long blocks = 0, varied = 0;
+            var g = map.GroundRgba;
+            for (int y = 0; y + r <= th; y += r)
+                for (int x = 0; x + r <= tw; x += r)
+                {
+                    blocks++;
+                    int i0 = (y * tw + x) * 4;
+                    bool same = true;
+                    for (int dy = 0; dy < r && same; dy++)
+                        for (int dx = 0; dx < r && same; dx++)
+                        {
+                            int i = ((y + dy) * tw + x + dx) * 4;
+                            same = g[i] == g[i0] && g[i + 1] == g[i0 + 1] && g[i + 2] == g[i0 + 2];
+                        }
+                    if (!same) varied++;
+                }
+            double share = varied / (double)blocks;
+            ctx.Metric($"hdDetail_{map.Width}x{map.Height}", Math.Round(share, 3));
+            ctx.True(share > 0.1, $"{label}: only {share:P1} of the {r}x{r} texel blocks have detail - the HD ground looks upscaled");
         }
 
         private static readonly HashSet<string> TreeForms = new HashSet<string> { "oak", "pine", "birch", "willow", "palm", "dead", "blossom" };
@@ -618,6 +672,9 @@ namespace PixelCreatures.Tests
             ctx.True(area.PixelDensity == TestArea.DefaultPixelDensity && area.PixelDensity > 1, $"test area renders HD (density {area.PixelDensity})");
             ctx.True(area.AllActors().Concat(scenery).All(a => a.EffectiveDensity == area.PixelDensity && OneTexelPerViewPixel(a)),
                 "test area actors: one sprite texel per view pixel");
+            // the ground matches: as many texels per map unit as the sprites, uploaded and then released (100+ MB at HD)
+            ctx.True(area.Map.Resolution == (int)area.PixelDensity, $"ground images at {area.Map.Resolution} texels per map unit, sprites at {area.PixelDensity}");
+            ctx.True(area.Map.GroundRgba.Length == 0 && area.Map.WaterSurfaceRgba.Length == 0, "map images are released once they are on the GPU");
             ctx.True(scenery.All(s => s.Model!.Anatomy.Rig.Stationary && s.CullOffscreen && s.AnimationFps >= 6 && s.AnimationFps <= 8 && Math.Abs(s.PixelDensity - density) < 1e-6),
                 "scenery: stationary creations, culled offscreen, 6-8 poses/s, the creatures' pixel density");
             ctx.True(!area.AllActors().Any(a => scenery.Contains(a)), "scenery is not part of the population");

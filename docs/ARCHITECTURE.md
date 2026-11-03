@@ -220,9 +220,9 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
   stage pixel instead, halving their automatic zoom. The 100-creature overview grid and gallery
   thumbnails use classic density for throughput. The test area renders HD properly: its map view renders
   as many pixels per world unit as the actors' density (camera zoom 2), so each sprite texel is one view
-  pixel, and the zoom magnifies that view by whole numbers (2, 4, 6 or 8 screen pixels per unit); ground
-  textures keep one texel per unit and appear twice as coarse. `--density=1` gives classic sprites and
-  zoom steps of 1 to 8.
+  pixel, and the zoom magnifies that view by whole numbers (2, 4, 6 or 8 screen pixels per unit). The map
+  images are generated at the same resolution (HD ground, below). `--density=1` gives classic sprites, the
+  classic ground and zoom steps of 1 to 8.
 - **`CreatureActor`** (Node2D, scene `Runtime/CreatureActor.tscn`): loads a preset or family + seed,
   builds asynchronously, simulates with a fixed time step, renders at the animation rate (`AnimationFps`,
   default 15 poses/s – typical for pixel art) and uploads the texture. Controlled via
@@ -244,8 +244,20 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
 - **Test area** (`workshop/TestArea`): `EnvironmentArt.GenerateMap` generates the map deterministically from
   size and seed – ponds with coves and sandy shores, paths, meadows, props at an even density, minimap –
   using managed buffers only, in parallel row by row and cancelable, on a worker thread; images and textures
-  are created afterwards on the main thread. The water shimmer is stored as four pre-uploaded frames per
-  pond. New creatures are spawned with a time budget of 4 ms per frame.
+  are created afterwards on the main thread, after which the map drops its image buffers. The water shimmer
+  is four frames of short glint runs per pond, drawn as rectangles (no frame textures). New creatures are
+  spawned with a time budget of 4 ms per frame.
+- **HD ground:** a map has two grids. The logical layers – terrain, elevation, water depth, clearance – have
+  one cell per map unit and drive navigation. The images – ground colours, water tint, cliff faces, glints –
+  have `Resolution` texels per unit (2 in the test area, matching HD sprites; `GenerateMap(..., resolution)`).
+  Shorelines, paths and colour noise are evaluated per texel, so edges are smooth instead of magnified, and
+  small details are drawn on the texel grid – grass blades, flowers, glints and rock strata get finer, not
+  bigger. Elevation is interpolated for the relief projection, except across a cliff step, where the upper
+  terrace holds so the face stays one clean wall. Texel (r·x, r·y) samples exactly the point of cell (x, y):
+  the logical layers are identical at every resolution, and resolution 1 reproduces the classic images
+  bit for bit (test `workshop.test_area_map_sizes`). The relief projection runs in parallel over column
+  blocks, because a texel only ever writes into its own column. Generation takes about twice as long at HD
+  (largest map ≈ 3–5 s in the background).
 - **Test area scenery** (`workshop/Environment/Scenery.cs`): with the default procedural style, every prop
   spot shows a `flora` or `prop` creation. The generator samples two or three genomes per form from the
   map seed (rejection-sampling seeds until the family picks that archetype) and builds them in parallel on

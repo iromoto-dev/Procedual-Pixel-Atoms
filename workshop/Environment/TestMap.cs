@@ -1,9 +1,16 @@
 // Procedural Pixel Creature Workshop - scalable map of the test area: ponds with sandy shores, winding
 // paths, grass with light meadows and darker patches, props (trees, bushes, rocks) and a minimap image.
 // Props are either procedural scenery (flora and prop creations, see Scenery.cs) or static textures.
-// Deterministic for (size, seed, style). Generation only touches managed buffers and core models - no
-// engine calls - so it can run on a worker thread; the test area turns the buffers into images, textures
-// and actors.
+// Deterministic for (size, seed, style, resolution). Generation only touches managed buffers and core
+// models - no engine calls - so it can run on a worker thread; the test area turns the buffers into
+// images, textures and actors.
+//
+// Two grids: the logical layers (terrain, elevation, water depth, clearance) have one cell per map unit
+// and drive navigation. The images (ground, water surface, cliff faces, glints) have Resolution texels
+// per map unit: at 2 (HD, matching HD sprites) the same continuous shapes - shorelines, paths, colour
+// noise, relief - are evaluated per texel, and small details (grass blades, flowers, glints, rock strata)
+// are drawn on the texel grid, so they get finer instead of just bigger. Texel (r*x, r*y) samples exactly
+// the point of logical cell (x, y), so both grids agree, and resolution 1 is the classic map.
 
 using System;
 using System.Collections.Generic;
@@ -66,10 +73,27 @@ namespace PixelCreatures.Workshop
         public double Cx, Cy, Rx, Ry;
         /// <summary>Seed of the pond's outline (lobes and bays), so ponds of one map differ in shape.</summary>
         public ulong ShapeSeed;
-        /// <summary>Area covered by the animated glint overlay (screen pixels).</summary>
+        /// <summary>Area that holds the pond with its shore and glints (screen pixels).</summary>
         public Rect2I Bounds;
-        /// <summary>Four RGBA frames of water glints over <see cref="Bounds"/>.</summary>
-        public byte[][] GlintFrames = Array.Empty<byte[]>();
+        /// <summary>Four frames of water glints (sparkle runs in ground texels), shown in a loop.</summary>
+        public GlintRun[][] GlintFrames = Array.Empty<GlintRun[]>();
+    }
+
+    /// <summary>A horizontal sparkle on the water: <see cref="Length"/> texels from (X, Y) in ground texels.</summary>
+    public readonly struct GlintRun
+    {
+        public readonly short X, Y;
+        public readonly byte Length;
+        /// <summary>Just appeared (foam white); the following frame it fades to light water.</summary>
+        public readonly bool Bright;
+
+        public GlintRun(int x, int y, int length, bool bright)
+        {
+            X = (short)x;
+            Y = (short)y;
+            Length = (byte)length;
+            Bright = bright;
+        }
     }
 
     public sealed class TestMap
@@ -78,12 +102,18 @@ namespace PixelCreatures.Workshop
 
         public int Width, Height;
         public ulong Seed;
+        /// <summary>Texels per map unit of the images (ground, water surface, cliff faces, glints): 1 = classic, 2 = HD.</summary>
+        public int Resolution = 1;
+        public int TexWidth => Width * Resolution;
+        public int TexHeight => Height * Resolution;
         /// <summary>Terrain per screen pixel: <see cref="Grass"/>, <see cref="Path"/>, <see cref="Sand"/>, <see cref="Water"/>.</summary>
         public byte[] Terrain = Array.Empty<byte>();
+        /// <summary>Ground colours per texel (TexWidth × TexHeight, already projected by the relief).</summary>
         public byte[] GroundRgba = Array.Empty<byte>();
         public float[] Elevation = Array.Empty<float>();
         public float[] WaterDepth = Array.Empty<float>();
         public byte[] Clearance = Array.Empty<byte>();
+        /// <summary>Translucent water tint per texel (TexWidth × TexHeight), drawn above swimmers.</summary>
         public byte[] WaterSurfaceRgba = Array.Empty<byte>();
         public readonly List<ReliefFace> Cliffs = new List<ReliefFace>();
         public readonly List<PondSpec> Ponds = new List<PondSpec>();
@@ -97,6 +127,17 @@ namespace PixelCreatures.Workshop
 
         public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
         public bool IsWater(int x, int y) => InBounds(x, y) && Terrain[y * Width + x] == Water;
+
+        /// <summary>
+        /// Drops the large image buffers (ground, water surface, cliff faces) once they are on the GPU; the logical
+        /// layers, glints and minimap stay. An HD map of the largest size holds more than 100 MB of them.
+        /// </summary>
+        public void ReleaseImages()
+        {
+            GroundRgba = Array.Empty<byte>();
+            WaterSurfaceRgba = Array.Empty<byte>();
+            foreach (var face in Cliffs) face.Rgba = Array.Empty<byte>();
+        }
 
         public float HeightAt(Vector2 p)
         {
@@ -176,6 +217,8 @@ namespace PixelCreatures.Workshop
     {
         public const int TreeVariants = 10, BushVariants = 8, RockVariants = 8;
         public const int MinimapMaxWidth = 240, MinimapMaxHeight = 150;
+        /// <summary>Highest image resolution (texels per map unit); the images of the largest map grow with its square.</summary>
+        public const int MaxResolution = 2;
         /// <summary>Screen pixels² per prop: 46 props on the small 640×400 map, same density on larger maps.</summary>
         private const double PropArea = 5600;
 
@@ -183,23 +226,28 @@ namespace PixelCreatures.Workshop
         /// Generates a test area map of width x height screen pixels. Runs the per-pixel work in parallel
         /// (row by row, results identical to a sequential run) and can be cancelled. The procedural style also
         /// samples and builds the flora and prop creations of the props (see <see cref="AssignScenery"/>); spot
-        /// positions and kinds are the same in both styles.
+        /// positions and kinds are the same in both styles. The resolution (texels per map unit, 1..<see cref="MaxResolution"/>)
+        /// only changes the images: terrain, elevation, water depth, clearance and props are the same at every resolution.
         /// </summary>
-        public static TestMap GenerateMap(int width, int height, ulong seed, CancellationToken cancel = default, SceneryStyle style = SceneryStyle.Procedural)
+        public static TestMap GenerateMap(int width, int height, ulong seed, CancellationToken cancel = default, SceneryStyle style = SceneryStyle.Procedural, int resolution = 1)
         {
             var sw = Stopwatch.StartNew();
-            int w = Math.Max(64, width), h = Math.Max(64, height);
-            var map = new TestMap { Width = w, Height = h, Seed = seed, Style = style, Terrain = new byte[w * h], GroundRgba = new byte[w * h * 4] };
+            int w = Math.Max(64, width), h = Math.Max(64, height), r = Math.Clamp(resolution, 1, MaxResolution);
+            var map = new TestMap { Width = w, Height = h, Seed = seed, Style = style, Resolution = r, Terrain = new byte[w * h] };
+            int tw = map.TexWidth, th = map.TexHeight;
+            map.GroundRgba = new byte[tw * th * 4];
+            // terrain per texel; at resolution 1 that is the logical terrain itself
+            var tex = r == 1 ? map.Terrain : new byte[tw * th];
             PlacePonds(map, new Rng(seed ^ 0x504F4E44UL));
-            var rowPaths = HorizontalPaths(w, h, seed);
-            var columnPaths = VerticalPaths(w, h, seed);
+            var rowPaths = HorizontalPaths(w, h, seed, r);
+            var columnPaths = VerticalPaths(w, h, seed, r);
             var options = new ParallelOptions { CancellationToken = cancel };
-            Parallel.For(0, h, options, y => GroundRow(map, rowPaths, columnPaths, y));
+            Parallel.For(0, th, options, y => GroundRow(map, tex, rowPaths, columnPaths, y));
             cancel.ThrowIfCancellationRequested();
-            Tufts(map);
-            Parallel.For(1, h - 1, options, y => ShoreRow(map, y));
-            BuildRelief(map, cancel);
-            foreach (var pond in map.Ponds) pond.GlintFrames = Glints(map, pond);
+            Tufts(map, tex);
+            Parallel.For(1, th - 1, options, y => ShoreRow(map, tex, y));
+            BuildRelief(map, tex, cancel);
+            foreach (var pond in map.Ponds) pond.GlintFrames = Glints(map, tex, pond);
             cancel.ThrowIfCancellationRequested();
             PlaceProps(map, new Rng(seed ^ 0x50524F50UL));
             if (style == SceneryStyle.Procedural) AssignScenery(map, cancel);
@@ -250,8 +298,8 @@ namespace PixelCreatures.Workshop
             }
         }
 
-        /// <summary>Centre lines (screen y per column) of the paths crossing the map from west to east.</summary>
-        private static double[][] HorizontalPaths(int w, int h, ulong seed)
+        /// <summary>Centre lines (screen y per texel column) of the paths crossing the map from west to east.</summary>
+        private static double[][] HorizontalPaths(int w, int h, ulong seed, int r)
         {
             int n = Math.Max(1, (int)Math.Round(h / 400.0));
             double band = h / (double)n;
@@ -261,15 +309,19 @@ namespace PixelCreatures.Workshop
                 // a single path sits at 0.42 h with the original curve of the small map
                 double baseY = band * k + band * 0.42, amp = Math.Min(band * 0.14, 64), phase = 0.6 + k * 1.7;
                 ulong s = seed + 3 + (ulong)k * 101;
-                var c = new double[w];
-                for (int x = 0; x < w; x++) c[x] = baseY + DMath.Sin(x * 0.018 + phase) * amp + PatternNoise.Perlin2(s, x * 0.03, 0.5) * 8;
+                var c = new double[w * r];
+                for (int tx = 0; tx < c.Length; tx++)
+                {
+                    double x = tx / (double)r;
+                    c[tx] = baseY + DMath.Sin(x * 0.018 + phase) * amp + PatternNoise.Perlin2(s, x * 0.03, 0.5) * 8;
+                }
                 paths[k] = c;
             }
             return paths;
         }
 
-        /// <summary>Centre lines (screen x per row) of the paths crossing from north to south (wider maps only).</summary>
-        private static double[][] VerticalPaths(int w, int h, ulong seed)
+        /// <summary>Centre lines (screen x per texel row) of the paths crossing from north to south (wider maps only).</summary>
+        private static double[][] VerticalPaths(int w, int h, ulong seed, int r)
         {
             int n = w / 900;
             double band = n > 0 ? w / (double)n : w;
@@ -278,27 +330,35 @@ namespace PixelCreatures.Workshop
             {
                 double baseX = band * k + band * 0.5, phase = 1.3 + k * 2.1;
                 ulong s = seed + 7 + (ulong)k * 101;
-                var c = new double[h];
-                for (int y = 0; y < h; y++) c[y] = baseX + DMath.Sin(y * 0.02 + phase) * 48 + PatternNoise.Perlin2(s, y * 0.03, 0.5) * 10;
+                var c = new double[h * r];
+                for (int ty = 0; ty < c.Length; ty++)
+                {
+                    double y = ty / (double)r;
+                    c[ty] = baseX + DMath.Sin(y * 0.02 + phase) * 48 + PatternNoise.Perlin2(s, y * 0.03, 0.5) * 10;
+                }
                 paths[k] = c;
             }
             return paths;
         }
 
         /// <summary>Large-scale grass variation in [-1, 1]: positive = light meadow, negative = darker patch.</summary>
-        private static double Meadow(ulong seed, int x, int y) => PatternNoise.Perlin2(seed + 60, x / 150.0, y / 95.0);
+        private static double Meadow(ulong seed, double x, double y) => PatternNoise.Perlin2(seed + 60, x / 150.0, y / 95.0);
 
         private static double MeadowLift(double m) => Math.Clamp((m - 0.2) * 2.5, 0, 1);
 
         private static double MeadowShade(double m) => Math.Clamp((-m - 0.3) * 2.5, 0, 1);
 
-        private static void GroundRow(TestMap map, double[][] rowPaths, double[][] columnPaths, int y)
+        /// <summary>Terrain and base colour of one texel row (map point of texel (tx, ty) = (tx, ty) / Resolution).</summary>
+        private static void GroundRow(TestMap map, byte[] tex, double[][] rowPaths, double[][] columnPaths, int ty)
         {
-            int w = map.Width;
+            int w = map.Width, tw = map.TexWidth, res = map.Resolution;
+            double y = ty / (double)res;
+            bool logicalRow = ty % res == 0;
             ulong seed = map.Seed;
             var ponds = map.Ponds;
-            for (int x = 0; x < w; x++)
+            for (int tx = 0; tx < tw; tx++)
             {
+                double x = tx / (double)res;
                 // ponds: ellipses with lobes and bays relative to their size, a little shore jitter in
                 // pixels and a sandy rim of about 10 px (thinner at the top and bottom, as seen from above)
                 byte t = TestMap.Grass;
@@ -313,8 +373,9 @@ namespace PixelCreatures.Workshop
                     if (v < 1.0) { t = TestMap.Water; break; }
                     if (v < 1.0 + 10.0 / p.Rx) t = TestMap.Sand;
                 }
-                if (t == TestMap.Grass && OnPath(seed, rowPaths, columnPaths, x, y)) t = TestMap.Path;
-                map.Terrain[y * w + x] = t;
+                if (t == TestMap.Grass && OnPath(seed, rowPaths, columnPaths, tx, ty, x, y)) t = TestMap.Path;
+                tex[ty * tw + tx] = t;
+                if (logicalRow && tx % res == 0) map.Terrain[ty / res * w + tx / res] = t;
 
                 double n = PatternNoise.Fbm2(seed + 9, x / 14.0, y / 10.0, 2) * 0.5 + 0.5;
                 Color c;
@@ -329,7 +390,7 @@ namespace PixelCreatures.Workshop
                         c = n < lo ? Grass0 : (n > hi ? (lift > 0.6 && n > hi + 0.24 ? Grass3 : Grass2) : Grass1);
                         break;
                 }
-                int i = (y * w + x) * 4;
+                int i = (ty * tw + tx) * 4;
                 map.GroundRgba[i] = (byte)c.R8;
                 map.GroundRgba[i + 1] = (byte)c.G8;
                 map.GroundRgba[i + 2] = (byte)c.B8;
@@ -337,24 +398,30 @@ namespace PixelCreatures.Workshop
             }
         }
 
-        private static bool OnPath(ulong seed, double[][] rowPaths, double[][] columnPaths, int x, int y)
+        /// <summary>Path test at map point (x, y); the centre lines are sampled per texel column (tx) and row (ty).</summary>
+        private static bool OnPath(ulong seed, double[][] rowPaths, double[][] columnPaths, int tx, int ty, double x, double y)
         {
             foreach (var c in rowPaths)
             {
-                double d = Math.Abs(y - c[x]);
+                double d = Math.Abs(y - c[tx]);
                 if (d < 10 && d - 7 - PatternNoise.Perlin2(seed + 4, x * 0.1, y * 0.1) * 2.5 < 0) return true;
             }
             foreach (var c in columnPaths)
             {
-                double d = Math.Abs(x - c[y]);
+                double d = Math.Abs(x - c[ty]);
                 if (d < 16 && d - 12 - PatternNoise.Perlin2(seed + 5, x * 0.1, y * 0.1) * 3 < 0) return true;
             }
             return false;
         }
 
-        /// <summary>Grass tufts and flowers (more flowers on meadows). Sequential: neighbouring cells may touch the same pixel.</summary>
-        private static void Tufts(TestMap map)
+        /// <summary>Grass tufts and flowers (more flowers on meadows). Sequential: neighbouring cells may touch the same texel.</summary>
+        private static void Tufts(TestMap map, byte[] tex)
         {
+            if (map.Resolution > 1)
+            {
+                HdTufts(map, tex);
+                return;
+            }
             const int cell = 5;
             ulong seed = map.Seed;
             for (int cy = 0; cy < map.Height / cell; cy++)
@@ -368,36 +435,83 @@ namespace PixelCreatures.Workshop
                     if (r < 0.34)
                     {
                         // small tuft: dark base, light tip (lit from the upper left)
-                        GrassPixel(map, x, y + 1, Grass0);
-                        GrassPixel(map, x - 1, y + 1, Grass0);
-                        GrassPixel(map, x, y, Grass2);
-                        if (r < 0.14) GrassPixel(map, x - 1, y, Grass3);
+                        GrassPixel(map, tex, x, y + 1, Grass0);
+                        GrassPixel(map, tex, x - 1, y + 1, Grass0);
+                        GrassPixel(map, tex, x, y, Grass2);
+                        if (r < 0.14) GrassPixel(map, tex, x - 1, y, Grass3);
                     }
                     else if (r < 0.34 + flowerRate)
                     {
                         var fc = Flowers[(int)(Hash(seed + 14, cx, cy) * Flowers.Length) % Flowers.Length];
-                        GrassPixel(map, x, y, fc);
-                        GrassPixel(map, x, y + 1, Grass0);
-                        if (r < 0.34 + flowerRate * 0.4) GrassPixel(map, x + 1, y, fc.Darkened(0.2f));
+                        GrassPixel(map, tex, x, y, fc);
+                        GrassPixel(map, tex, x, y + 1, Grass0);
+                        if (r < 0.34 + flowerRate * 0.4) GrassPixel(map, tex, x + 1, y, fc.Darkened(0.2f));
                     }
                 }
             }
         }
 
-        private static void GrassPixel(TestMap map, int x, int y, Color c)
+        /// <summary>
+        /// HD grass: more and finer tufts on the texel grid - two to four single-texel blades of one to three texels,
+        /// dark at the root and lit at the tip from the upper left - and small blossoms on stems, more on meadows.
+        /// </summary>
+        private static void HdTufts(TestMap map, byte[] tex)
         {
-            if (!map.InBounds(x, y) || map.Terrain[y * map.Width + x] != TestMap.Grass) return;
-            int i = (y * map.Width + x) * 4;
+            int res = map.Resolution, cell = 3 * res + 1;
+            ulong seed = map.Seed;
+            for (int cy = 0; cy < map.TexHeight / cell; cy++)
+            {
+                for (int cx = 0; cx < map.TexWidth / cell; cx++)
+                {
+                    double r = Hash(seed + 11, cx, cy);
+                    int x = cx * cell + (int)(Hash(seed + 12, cx, cy) * (cell - 3)) + 1;
+                    int y = cy * cell + (int)(Hash(seed + 13, cx, cy) * (cell - 4)) + 3;
+                    double lift = MeadowLift(Meadow(seed, x / (double)res, y / (double)res));
+                    double flowerRate = 0.008 + lift * 0.05;
+                    if (r < 0.3)
+                    {
+                        int blades = 2 + (int)(Hash(seed + 15, cx, cy) * 3);
+                        for (int k = 0; k < blades; k++)
+                        {
+                            int bx = x + k - blades / 2;
+                            // the middle blades grow tallest; the leftmost catches the light
+                            int height = 1 + (int)(Hash(seed + 16, cx * 4 + k, cy) * (k == 0 || k == blades - 1 ? 2 : 3));
+                            GrassPixel(map, tex, bx, y + 1, Grass0);
+                            for (int j = 0; j < height; j++)
+                            {
+                                bool tip = j == height - 1;
+                                GrassPixel(map, tex, bx, y - j, tip ? (k == 0 && r < 0.15 ? Grass3 : Grass2) : Grass1);
+                            }
+                        }
+                    }
+                    else if (r < 0.3 + flowerRate)
+                    {
+                        var fc = Flowers[(int)(Hash(seed + 14, cx, cy) * Flowers.Length) % Flowers.Length];
+                        // a blossom of two to three texels, lit from the upper left, on a dark stem
+                        GrassPixel(map, tex, x, y + 2, Grass0);
+                        GrassPixel(map, tex, x, y + 1, Grass1);
+                        GrassPixel(map, tex, x, y, fc);
+                        GrassPixel(map, tex, x + 1, y, fc.Darkened(0.2f));
+                        if (r < 0.3 + flowerRate * 0.5) GrassPixel(map, tex, x, y - 1, fc.Lightened(0.15f));
+                    }
+                }
+            }
+        }
+
+        private static void GrassPixel(TestMap map, byte[] tex, int x, int y, Color c)
+        {
+            int tw = map.TexWidth;
+            if (x < 0 || y < 0 || x >= tw || y >= map.TexHeight || tex[y * tw + x] != TestMap.Grass) return;
+            int i = (y * tw + x) * 4;
             map.GroundRgba[i] = (byte)c.R8;
             map.GroundRgba[i + 1] = (byte)c.G8;
             map.GroundRgba[i + 2] = (byte)c.B8;
         }
 
-        /// <summary>Foam on water next to land, a dark edge below the bank (depth cue). Reads terrain only.</summary>
-        private static void ShoreRow(TestMap map, int y)
+        /// <summary>Foam on water next to land, a dark edge below the bank (depth cue). Reads terrain only (per texel).</summary>
+        private static void ShoreRow(TestMap map, byte[] t, int y)
         {
-            int w = map.Width;
-            var t = map.Terrain;
+            int w = map.TexWidth;
             for (int x = 1; x < w - 1; x++)
             {
                 int i = y * w + x;
@@ -410,20 +524,25 @@ namespace PixelCreatures.Workshop
             }
         }
 
-        /// <summary>Four frames of animated glints for one pond (cells in map coordinates, so frames line up).</summary>
-        private static byte[][] Glints(TestMap map, PondSpec pond)
+        /// <summary>
+        /// Four frames of animated glints for one pond: cells on the texel grid, so frames line up and HD glints are
+        /// finer and more numerous. A glint appears bright for one frame and fades to light water in the next.
+        /// </summary>
+        private static GlintRun[][] Glints(TestMap map, byte[] tex, PondSpec pond)
         {
-            const int cell = 9;
-            var b = pond.Bounds;
-            int bw = b.Size.X, bh = b.Size.Y;
+            int res = map.Resolution, cell = res == 1 ? 9 : 6 * res - 1;
+            int tw = map.TexWidth, th = map.TexHeight;
+            int x0 = pond.Bounds.Position.X * res, y0 = pond.Bounds.Position.Y * res, x1 = pond.Bounds.End.X * res, y1 = pond.Bounds.End.Y * res;
+            bool Water(int x, int y) => x >= 0 && y >= 0 && x < tw && y < th && tex[y * tw + x] == TestMap.Water;
             ulong seed = map.Seed;
-            var frames = new byte[4][];
+            var frames = new GlintRun[4][];
+            var runs = new List<GlintRun>();
             for (int k = 0; k < 4; k++)
             {
-                var ov = new byte[bw * bh * 4];
-                for (int cy = b.Position.Y / cell; cy <= b.End.Y / cell; cy++)
+                runs.Clear();
+                for (int cy = y0 / cell; cy <= y1 / cell; cy++)
                 {
-                    for (int cx = b.Position.X / cell; cx <= b.End.X / cell; cx++)
+                    for (int cx = x0 / cell; cx <= x1 / cell; cx++)
                     {
                         double r = Hash(seed + 40, cx, cy);
                         if (r > 0.16) continue;
@@ -431,12 +550,16 @@ namespace PixelCreatures.Workshop
                         int age = (k - ph + 4) % 4;
                         if (age > 1) continue;
                         int x = cx * cell + (int)(Hash(seed + 42, cx, cy) * 5), y = cy * cell + (int)(Hash(seed + 43, cx, cy) * 6);
-                        if (!map.IsWater(x, y) || !map.IsWater(x + 3, y) || !map.IsWater(x, y - 2) || !map.IsWater(x, y + 2)) continue;
-                        int len = age == 0 ? 2 : 3;
-                        for (int j = 0; j < len; j++) PutClip(ov, bw, bh, x + j + age - b.Position.X, y - b.Position.Y, age == 0 ? Foam : Water2);
+                        if (!Water(x, y) || !Water(x + 3, y) || !Water(x, y - 2) || !Water(x, y + 2)) continue;
+                        // HD glints are finer than classic ones (two to three map units) but long enough to catch the eye
+                        int len = res == 1 ? (age == 0 ? 2 : 3) : (age == 0 ? 3 : 4);
+                        // clipped to the pond's area: where pond areas overlap, the neighbour shows its own glints
+                        int start = Math.Max(x + age, x0), end = Math.Min(x + age + len, x1);
+                        if (y < y0 || y >= y1 || end <= start) continue;
+                        runs.Add(new GlintRun(start, y, end - start, age == 0));
                     }
                 }
-                frames[k] = ov;
+                frames[k] = runs.ToArray();
             }
             return frames;
         }
@@ -481,9 +604,9 @@ namespace PixelCreatures.Workshop
                     for (int sy = 0; sy < 3; sy++)
                         for (int sx = 0; sx < 3; sx++)
                         {
-                            int x = Math.Min(map.Width - 1, (int)((mx + (sx + 0.5) / 3.0) / scale));
-                            int y = Math.Min(map.Height - 1, (int)((my + (sy + 0.5) / 3.0) / scale));
-                            int i = (y * map.Width + x) * 4;
+                            int x = Math.Min(map.TexWidth - 1, (int)((mx + (sx + 0.5) / 3.0) / scale * map.Resolution));
+                            int y = Math.Min(map.TexHeight - 1, (int)((my + (sy + 0.5) / 3.0) / scale * map.Resolution));
+                            int i = (y * map.TexWidth + x) * 4;
                             r += map.GroundRgba[i];
                             g += map.GroundRgba[i + 1];
                             b += map.GroundRgba[i + 2];
