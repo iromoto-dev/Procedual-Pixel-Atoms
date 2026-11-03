@@ -73,6 +73,8 @@ namespace PixelCreatures.Core.Shapes
         public double DomainLength = 12;
         public bool Nostrils = true;
         public double JawOpenMax = 0.55;
+        /// <summary>High density facial structure (nasal bridge, cheekbones, brow over each eye, lips, chin).</summary>
+        public bool Structure = true;
     }
 
     public sealed class HeadResult
@@ -243,6 +245,8 @@ namespace PixelCreatures.Core.Shapes
                 AddTeeth(b, s, head, jaw, jl, jr0, jr1, snoutTip, snoutR1, jawGroup, group);
             }
 
+            if (s.Structure) BuildStructure(b, s, head, group, skullC, skullR, snoutBase, snoutTip, snoutR0, snoutR1, total, r);
+
             // --- eyes
             double eyeT = DMath.Lerp(0.15, 0.62, s.EyeForward);
             for (int side = -1; side <= 1; side += 2)
@@ -284,6 +288,68 @@ namespace PixelCreatures.Core.Shapes
             if (r.Jaw >= 0) b.Rig.Jaw = r.Jaw;
             b.Rig.JawOpenMax = s.JawOpenMax;
             return r;
+        }
+
+        /// <summary>
+        /// High density facial structure, blended into the head group: the stop and nasal bridge between the
+        /// eyes and the snout, cheekbones below the eyes, a brow arch over each eye, lips (flews) along the lower
+        /// snout and a chin. These primitives only appear at a pixel density of at least Limbs.HdDensity.
+        /// </summary>
+        private static void BuildStructure(AnatomyBuilder b, HeadSpec s, int head, int group, Vec3 skullC, Vec3 skullR,
+            Vec3 snoutBase, Vec3 snoutTip, double snoutR0, double snoutR1, double total, HeadResult r)
+        {
+            double hd = Limbs.HdDensity;
+            PrimitiveDef Hd(PrimitiveDef p, string tag, bool pattern = true)
+            {
+                p.MinDensity = hd;
+                p.DomainLength = total;
+                p.Tag = s.Name + "." + tag;
+                if (!pattern) p.Flags |= PrimFlags.NoPattern;
+                return p;
+            }
+            bool snout = s.SnoutLength > 1.5 && s.Nose == NoseKind.Pad;
+            if (snout)
+            {
+                Vec3 dir = (snoutTip - snoutBase).NormalizedOr(Vec3.UnitX);
+                Vec3 up = new Vec3(-dir.Y, dir.X, 0);
+                // nasal bridge: a narrow ridge along the top of the snout, rising into the stop at the forehead
+                Vec3 b0 = snoutBase + up * (snoutR0 * 0.55) - dir * (snoutR0 * 0.2);
+                Vec3 b1 = snoutTip + up * (snoutR1 * 0.45) - dir * (snoutR1 * 0.5);
+                Hd(b.Cone(group, head, b0, snoutR0 * 0.62, head, b1, snoutR1 * 0.55, s.SnoutMaterial, PatternDomain.Head, 0.6, 0.95), "bridge", s.SnoutPattern);
+                Vec3 stop = skullC + new Vec3(skullR.X * 0.55, skullR.Y * 0.25, 0);
+                Hd(b.Ellipsoid(group, head, stop, new Vec3(skullR.X * 0.38, skullR.Y * 0.42, skullR.Z * 0.55), s.Material, PatternDomain.Head, 0.45, 0.6), "stop");
+                // lips / flews: fuller lower snout on both sides
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vec3 l0 = Vec3.Lerp(snoutBase, snoutTip, 0.25) - up * (snoutR0 * 0.35) + new Vec3(0, 0, side * snoutR0 * 0.42);
+                    Vec3 l1 = Vec3.Lerp(snoutBase, snoutTip, 0.9) - up * (snoutR1 * 0.38) + new Vec3(0, 0, side * snoutR1 * 0.4);
+                    Hd(b.Cone(group, head, l0, snoutR0 * 0.62, head, l1, snoutR1 * 0.58, s.SnoutMaterial, PatternDomain.Head, 0.7, 1.0, side), "lip", s.SnoutPattern);
+                }
+            }
+            // cheekbones under and behind the eyes; brow arches over them
+            for (int side = -1; side <= 1; side += 2)
+            {
+                if (s.EyeCount < 2 && side < 0) continue;
+                double lat = side * DMath.Lerp(0.95, 0.55, s.EyeForward);
+                Vec3 dir = new Vec3(DMath.Lerp(0.35, 0.72, s.EyeForward), DMath.Clamp(s.EyeHeight, -0.8, 0.9) * 0.55 + 0.15, s.EyeCount == 1 ? 0 : lat);
+                Vec3 eye = ShapeMath.EllipsoidSurface(skullC, Mat3.Identity, skullR, dir);
+                Vec3 nrm = ShapeMath.EllipsoidNormal(Mat3.Identity, skullR, eye - skullC);
+                double er = Math.Max(0.8, s.EyeSize * 0.55);
+                Vec3 cheek = eye - nrm * (er * 0.35) + new Vec3(-er * 0.4, -er * 1.25, 0);
+                Hd(b.Ellipsoid(group, head, cheek, new Vec3(skullR.X * 0.36, er * 0.75, skullR.Z * 0.32), s.Material, PatternDomain.Head, 0.4, 0.55, null, side), "cheekbone");
+                double browH = 0.35 + 0.65 * DMath.Saturate(s.Brow + 0.25);
+                Vec3 brow = eye - nrm * (er * 0.25) + new Vec3(er * 0.15, er * (0.95 + 0.25 * browH), 0);
+                Hd(b.Ellipsoid(group, head, brow, new Vec3(er * 1.15, er * 0.38 * browH + 0.3, er * 0.75), s.Material, PatternDomain.Head, 0.4, 0.5, null, side), "browarch");
+            }
+            if (r.Jaw >= 0 || s.JawLength > 0.05)
+            {
+                // chin: a small rounded mass under the front of the lower jaw (on the jaw bone, so it moves)
+                if (r.Jaw >= 0)
+                {
+                    double jl = r.JawLength, jr = r.JawRadius;
+                    Hd(b.Ellipsoid(r.JawGroup, r.Jaw, new Vec3(jl * 0.82, -jr * 0.35, 0), new Vec3(jl * 0.22, jr * 0.62, jr * 0.75), s.JawMaterial, PatternDomain.Head, 0.85, 0.95), "chin");
+                }
+            }
         }
 
         private static void AddTeeth(AnatomyBuilder b, HeadSpec s, int head, int jaw, double jl, double jr0, double jr1, Vec3 snoutTip, double snoutR1, int jawGroup, int headGroup)

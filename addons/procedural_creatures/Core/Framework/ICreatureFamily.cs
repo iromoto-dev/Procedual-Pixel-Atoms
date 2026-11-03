@@ -19,8 +19,35 @@ namespace PixelCreatures.Core
         public ArchetypeInfo(string id, string label, double weight = 1) { Id = id; Label = label; Weight = weight; }
     }
 
+    /// <summary>Broad kind of a creation, used to group families in user interfaces and spawners.</summary>
+    public enum CreationCategory
+    {
+        /// <summary>Animals and natural creatures (fauna).</summary>
+        Creature,
+        /// <summary>Creatures of myth and legend.</summary>
+        Mythical,
+        /// <summary>Monsters and horrors.</summary>
+        Monster,
+        /// <summary>Trees, bushes, flowers and other plants (stationary, sway in the wind).</summary>
+        Flora,
+        /// <summary>Objects and scenery (stationary).</summary>
+        Prop,
+    }
+
+    /// <summary>
+    /// Optional family hook: adjusts the surface spec built from the pattern genes, typically by giving
+    /// material slots their own styles (bark trunk with a foliage canopy). Called once per surface build.
+    /// </summary>
+    public interface ISurfaceCustomizer
+    {
+        void CustomizeSurface(CreatureGenome genome, Palettes.SurfaceSpec surface);
+    }
+
     public interface ICreatureFamily
     {
+        /// <summary>Broad category (creature, mythical, monster, flora, prop). Defaults to Creature.</summary>
+        CreationCategory Category => CreationCategory.Creature;
+
         /// <summary>Stable id stored in genomes (never rename; add a migration instead).</summary>
         string Id { get; }
         string DisplayName { get; }
@@ -50,6 +77,7 @@ namespace PixelCreatures.Core
         public abstract string DisplayName { get; }
         public abstract string Description { get; }
         public virtual int Order => 100;
+        public virtual CreationCategory Category => CreationCategory.Creature;
         public virtual string PaletteRuleId => "default";
         public abstract IReadOnlyList<ArchetypeInfo> Archetypes { get; }
 

@@ -186,7 +186,7 @@ namespace PixelCreatures.Core.Motion
             Vec3 oldPos = ctx.Position;
             if (Options.InternalDrive)
             {
-                bool blocked = _rest.Progress > 0.01 || _action.Envelope > 0.5;
+                bool blocked = _rest.Progress > 0.01 || _action.Envelope > 0.5 || ctx.Rig.Stationary;
                 Vec3 desired = blocked ? Vec3.Zero : new Vec3(DesiredVelocity.X, 0, DesiredVelocity.Z);
                 double maxSpeed = traits.RunSpeed * 1.25;
                 if (desired.Length > maxSpeed) desired = desired.Normalized() * maxSpeed;
@@ -299,6 +299,13 @@ namespace PixelCreatures.Core.Motion
             _rest.Evaluate(ctx, ref p);
             _action.Evaluate(ctx, ref p);
             _hit.Evaluate(ctx, ref p);
+            if (ctx.Rig.Stationary)
+            {
+                // rooted objects pivot about their base but never slide or bob
+                p.BodyOffset = Vec3.Zero;
+                p.Breath = 0;
+                p.Crouch = 0;
+            }
             p.Altitude += _loco.Altitude(ctx) * (1 - ctx.RestWeight);
             p.EyeOpen = DMath.Saturate(p.EyeOpen);
             ctx.Altitude = p.Altitude;

@@ -80,6 +80,15 @@ namespace PixelCreatures.Core
         /// <summary>Render quality 0 (low) .. 2 (high). Primitives with MinQuality above are skipped.</summary>
         public int Quality;
         public bool DrawShadow;
+        /// <summary>
+        /// Output pixels per world unit (1 = classic resolution). Geometry, outlines, features and patterns
+        /// are rasterized at this density; motion, metrics and canvases stay in world units, so frames must
+        /// be sized with <see cref="PixelCreatures.Core.Anatomy.CanvasSpec.Scaled"/>. Values below 1 are treated as 1.
+        /// </summary>
+        public double Density;
+
+        /// <summary>Effective density (at least 1).</summary>
+        public double PixelDensity => Density > 1 ? Density : 1.0;
 
         public static ViewSpec Default(double yaw) => new ViewSpec
         {
@@ -90,6 +99,14 @@ namespace PixelCreatures.Core
             Flash = 0,
             Quality = 2,
             DrawShadow = true,
+            Density = 1,
         };
+
+        public static ViewSpec Default(double yaw, double density)
+        {
+            var v = Default(yaw);
+            v.Density = density;
+            return v;
+        }
     }
 }

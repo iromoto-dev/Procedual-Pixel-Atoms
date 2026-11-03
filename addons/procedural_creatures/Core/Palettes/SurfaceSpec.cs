@@ -109,6 +109,12 @@ namespace PixelCreatures.Core.Palettes
 
         public MaterialStyle StyleOf(MaterialSlot slot) => _slotStyles[(int)slot];
 
+        /// <summary>
+        /// Overrides the material style of one slot (bark trunk with a foliage canopy, wooden crate with metal
+        /// bands). Only call while the spec is being built, before it is shared (see ISurfaceCustomizer).
+        /// </summary>
+        public void OverrideSlotStyle(MaterialSlot slot, MaterialStyle style) => _slotStyles[(int)slot] = style;
+
         public static SurfaceSpec Plain(MaterialStyle style) =>
             new SurfaceSpec(style, PatternKind.None, 3, 0, true, 0.4, 0, 0, 0.3, 1, 1);
 

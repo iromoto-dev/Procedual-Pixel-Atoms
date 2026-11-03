@@ -325,6 +325,12 @@ namespace PixelCreatures.Core.Palettes
             "feather" => MaterialStyles.Feather,
             "bark" => MaterialStyles.Bark,
             "leaf" => MaterialStyles.Leaf,
+            "foliage" => MaterialStyles.Foliage,
+            "wood" => MaterialStyles.Wood,
+            "masonry" => MaterialStyles.Masonry,
+            "crystal" => MaterialStyles.Crystal,
+            "metal" => MaterialStyles.Metal,
+            "glazed" => MaterialStyles.Glossy,
             _ => MaterialStyles.Hide,
         };
 

@@ -43,8 +43,12 @@ namespace PixelCreatures.Harness
                         Console.WriteLine($"            [\"{key}\"] = 0x{value:x16}UL,");
                     return 0;
                 }
+                case "sheet":
+                    // sheet <outDir> [family[,family]|all] [count] [scale] [--by-archetype] [--walk] [--dir=N] [--seed=N]
+                    return ContactSheet.Run(outDir, args.Length > 2 ? args[2..] : Array.Empty<string>());
                 default:
                     Console.WriteLine("CoreHarness test <outdir> [filter|all] [seedsPerFamily]");
+                    Console.WriteLine("CoreHarness sheet <outdir> [family|all] [count] [scale] [--by-archetype] [--walk] [--dir=N]");
                     Console.WriteLine("CoreHarness goldens  (print deterministic baseline values)");
                     return command == "help" ? 0 : 1;
             }

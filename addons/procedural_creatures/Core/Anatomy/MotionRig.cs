@@ -179,6 +179,8 @@ namespace PixelCreatures.Core.Anatomy
         Spray,
         /// <summary>Threat display: rear up, lift the front legs, bare the fangs, snap down.</summary>
         Rear,
+        /// <summary>Stationary objects: a rustling shake (trees, bushes) that also opens lids and flares flames.</summary>
+        Shake,
     }
 
     public enum RestStyle : byte
@@ -190,6 +192,8 @@ namespace PixelCreatures.Core.Anatomy
         Perch,
         Puddle,
         Fold,
+        /// <summary>Stationary objects: no body motion; foliage droops a little, lids close, flames dim.</summary>
+        Dormant,
     }
 
     public sealed class MotionRig
@@ -226,6 +230,11 @@ namespace PixelCreatures.Core.Anatomy
         public bool Upright;
         /// <summary>Default hover/swim altitude of the root (0 for ground creatures).</summary>
         public double Altitude;
+        /// <summary>
+        /// Stationary creation (trees, plants, props): the motor never moves it on its own; it can still turn
+        /// to a facing direction, sway, act (shake, open) and react to hits.
+        /// </summary>
+        public bool Stationary;
         /// <summary>Extra per family tuning values for motion modules.</summary>
         public readonly Dictionary<string, double> Tuning = new Dictionary<string, double>();
 

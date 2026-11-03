@@ -443,6 +443,7 @@ namespace PixelCreatures.Core.Families
             double drop = midR * DMath.Lerp(0.02, 0.36, belly);
             var barrel = b.Ellipsoid(body, spine, new Vec3(0, -drop, 0), new Vec3(L * 0.43, midR, midR * wz * 0.94), MaterialSlot.Primary, PatternDomain.Body, 0.15, 0.85);
             barrel.DomainLength = bodyDomain; barrel.Tag = "barrel";
+            BuildTorsoDetail(b, body, pelvis, spine, chest, barrel, form, L, hipR, chestR, midR, drop, wz, belly, bodyDomain);
             if (hump > 0.12)
             {
                 var hp = b.Ellipsoid(body, chest, new Vec3(-chestR * 0.3, chestR * (0.55 + hump * 0.35), 0), new Vec3(chestR * 0.85, chestR * 0.5 * hump * 1.6, chestR * 0.62 * wz),
@@ -631,6 +632,8 @@ namespace PixelCreatures.Core.Families
                         MetaAngle = meta,
                         BlendRadius = DMath.Clamp(rTop * 0.45, 0.8, 2.2),
                         DomainLength = total,
+                        Cloven = form == "bovine" || form == "cervine" || form == "boar",
+                        Muscle = DMath.Lerp(0.45, 1.0, legTh),
                     };
                     // plantigrade: segment lengths hip->knee->ankle cover the leg; distal = foot length
                     if (style == LegStyle.Plantigrade)
@@ -716,6 +719,56 @@ namespace PixelCreatures.Core.Families
             b.AnimationMargin = Math.Max(7, baseL * 0.32 + hornReach);
             b.ExtraHeadroom = Math.Max(4, skullL * 0.8);
             return b.Build(g.AnatomyKey);
+        }
+
+        /// <summary>
+        /// High density torso anatomy (drawn from Limbs.HdDensity): shoulder blades and withers, hamstrings
+        /// behind the hips, and for lean builds a deep rib cage with a tucked-up loin instead of the single
+        /// barrel. Soft union keeps the masses joined; the shading reveals the structure.
+        /// </summary>
+        private static void BuildTorsoDetail(AnatomyBuilder b, int body, int pelvis, int spine, int chest, PrimitiveDef barrel, string form,
+            double L, double hipR, double chestR, double midR, double drop, double wz, double belly, double domain)
+        {
+            double hd = Limbs.HdDensity;
+            PrimitiveDef Hd(PrimitiveDef p, string tag)
+            {
+                p.MinDensity = hd;
+                p.DomainLength = domain;
+                p.Tag = tag;
+                return p;
+            }
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // scapula: a flat oval on the upper front of the chest, sloping back to the withers
+                var sc = b.Ellipsoid(body, chest, new Vec3(chestR * 0.05, chestR * 0.42, side * chestR * wz * 0.6),
+                    new Vec3(chestR * 0.62, chestR * 0.46, chestR * 0.3), MaterialSlot.Primary, PatternDomain.Body, 0.72, 0.9,
+                    Quat.AxisAngle(Vec3.UnitZ, 0.45), side);
+                Hd(sc, "scapula");
+                // hamstring / thigh mass behind the hip joint
+                var hs = b.Ellipsoid(body, pelvis, new Vec3(-hipR * 0.32, -hipR * 0.08, side * hipR * wz * 0.6),
+                    new Vec3(hipR * 0.62, hipR * 0.78, hipR * 0.36), MaterialSlot.Primary, PatternDomain.Body, 0.02, 0.2,
+                    Quat.AxisAngle(Vec3.UnitZ, -0.25), side);
+                Hd(hs, "hamstring");
+            }
+            // withers: the top of the shoulders rises a little above the back line
+            Hd(b.Ellipsoid(body, chest, new Vec3(-chestR * 0.15, chestR * 0.72, 0), new Vec3(chestR * 0.7, chestR * 0.35, chestR * wz * 0.45),
+                MaterialSlot.Primary, PatternDomain.Body, 0.68, 0.85), "withers");
+            bool lean = belly < 0.55 && form != "bovine" && form != "ursine" && form != "boar" && form != "rodent";
+            if (lean)
+            {
+                // deep chest, tucked belly: the classic barrel hands over to two masses at high density
+                barrel.MaxDensity = hd;
+                Hd(b.Ellipsoid(body, spine, new Vec3(L * 0.12, -drop * 1.1 - midR * 0.06, 0), new Vec3(L * 0.33, midR * 1.04, midR * wz * 0.95),
+                    MaterialSlot.Primary, PatternDomain.Body, 0.4, 0.85), "ribcage");
+                Hd(b.Ellipsoid(body, spine, new Vec3(-L * 0.22, midR * 0.14, 0), new Vec3(L * 0.3, midR * 0.8, midR * wz * 0.86),
+                    MaterialSlot.Primary, PatternDomain.Body, 0.15, 0.45), "loin");
+            }
+            else
+            {
+                // heavy builds: a dewlap/brisket under the chest
+                Hd(b.Ellipsoid(body, chest, new Vec3(chestR * 0.55, -chestR * 0.62, 0), new Vec3(chestR * 0.55, chestR * 0.45, chestR * wz * 0.5),
+                    MaterialSlot.Primary, PatternDomain.Body, 0.85, 1.0), "brisket");
+            }
         }
 
         private static void FixPhases(List<LegRig> legs)

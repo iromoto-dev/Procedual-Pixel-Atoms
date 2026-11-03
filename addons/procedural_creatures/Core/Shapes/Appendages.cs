@@ -60,6 +60,73 @@ namespace PixelCreatures.Core.Shapes
 
     public static class Ears
     {
+        /// <summary>
+        /// Ear blade in the ear bone frame (+X along the ear): a leaf shaped outline in the plane facing the
+        /// head's front, made of plates from the base to the tip, with a thick root and an inner ear plate.
+        /// </summary>
+        private static void BuildHdEar(AnatomyBuilder b, EarSpec s, int g, int ear, int tip, int side, double len, double r0, double r1, Vec3 dirWorld)
+        {
+            double hd = Limbs.HdDensity;
+            var xe = b.RestWorld(ear);
+            // the blade faces the head front: its width runs along the head's lateral axis projected on the ear plane
+            Vec3 frontW = b.RestWorld(s.HeadBone).Dir(Vec3.UnitX);
+            Vec3 latW = Vec3.Cross(dirWorld, frontW).NormalizedOr(Vec3.UnitZ);
+            Vec3 normW = Vec3.Cross(latW, dirWorld).NormalizedOr(frontW);
+            Vec3 lat = xe.InverseDir(latW), nrm = xe.InverseDir(normW);
+            double w = Math.Max(r0 * 1.15, len * (s.Kind == EarKind.Round ? 0.55 : (s.Kind == EarKind.Long ? 0.22 : 0.36))) * s.Width;
+            double cup = w * 0.22;
+            bool round = s.Kind == EarKind.Round;
+            // outline points along the ear (t, half width): widest near the base, pointed or round tip
+            double[] ts = round ? new[] { 0.0, 0.3, 0.65, 0.92 } : new[] { 0.0, 0.28, 0.6, 0.86 };
+            double[] ws = round ? new[] { 0.75, 1.0, 0.95, 0.55 } : new[] { 0.85, 1.0, 0.68, 0.3 };
+            Vec3 P(double t, double hw, double back) => new Vec3(len * t, 0, 0) + lat * (w * hw) - nrm * back;
+            var tipL = b.RestWorld(tip);
+            Vec3 tipPt = round ? new Vec3(len * 1.02, 0, 0) : new Vec3(len * 1.04, 0, 0);
+            PrimitiveDef Plate(Vec3 a, Vec3 c, Vec3 d, MaterialSlot m, bool inner)
+            {
+                // vertices beyond 60 % of the length follow the tip bone, so the ear bends with its chain
+                int Bone(Vec3 v) => v.X > len * 0.6 ? tip : ear;
+                Vec3 L(Vec3 v) => Bone(v) == tip ? tipL.InversePoint(xe.Point(v)) : v;
+                var t = b.Triangle(g, Bone(a), L(a), Bone(c), L(c), Bone(d), L(d), m, inner ? PatternDomain.None : PatternDomain.Appendage, side);
+                t.Flags |= PrimFlags.TwoSided | PrimFlags.NoShadow;
+                if (inner) { t.Flags |= PrimFlags.NoPattern; t.ShadeBias = -1; }
+                t.DomainLength = len;
+                t.MinDensity = hd;
+                t.Tag = s.Name + (inner ? ".hdinner" : ".hdblade");
+                return t;
+            }
+            // outer blade: a fan of quads from the midrib (slightly cupped backwards) to both rims
+            for (int k = 0; k < ts.Length; k++)
+            {
+                double t0 = ts[k], t1 = k + 1 < ts.Length ? ts[k + 1] : 1.0;
+                double w0 = ws[k], w1 = k + 1 < ts.Length ? ws[k + 1] : 0.0;
+                Vec3 m0 = new Vec3(len * t0, 0, 0) - nrm * cup, m1 = k + 1 < ts.Length ? new Vec3(len * t1, 0, 0) - nrm * cup : tipPt;
+                for (int sd = -1; sd <= 1; sd += 2)
+                {
+                    Vec3 e0 = P(t0, sd * w0, 0), e1 = k + 1 < ts.Length ? P(t1, sd * w1, 0) : tipPt;
+                    Plate(m0, e0, e1, s.Material, false);
+                    if (k + 1 < ts.Length) Plate(m0, e1, m1, s.Material, false);
+                }
+            }
+            // inner ear: a smaller blade just in front of the outer one
+            if (s.Kind != EarKind.Floppy)
+            {
+                Vec3 off = nrm * Math.Max(0.35, cup * 0.6);
+                Vec3 i0 = new Vec3(len * 0.08, 0, 0) + off, i1 = new Vec3(len * 0.72, 0, 0) + off;
+                for (int sd = -1; sd <= 1; sd += 2)
+                {
+                    Vec3 e = new Vec3(len * 0.32, 0, 0) + lat * (sd * w * 0.58) + off;
+                    Plate(i0, e, i1, MaterialSlot.Secondary, true);
+                }
+            }
+            // ear root: a short thick base where the ear joins the skull
+            var root = b.Ellipsoid(g, ear, new Vec3(len * 0.08, 0, 0), new Vec3(len * 0.16, Math.Max(0.6, r0 * 0.85), Math.Max(0.6, r0 * 0.85)), s.Material, PatternDomain.Appendage, 0, 0.2, null, side);
+            root.MinDensity = hd;
+            root.DomainLength = len;
+            root.Tag = s.Name + ".hdroot";
+            _ = r1;
+        }
+
         public static void Build(AnatomyBuilder b, EarSpec s)
         {
             if (s.Kind == EarKind.None || s.Size < 0.8) return;
@@ -99,6 +166,14 @@ namespace PixelCreatures.Core.Shapes
                     inner.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
                     inner.ShadeBias = -1;
                     inner.Tag = s.Name + ".inner";
+                    inner.MaxDensity = Limbs.HdDensity;
+                }
+                if (s.Kind == EarKind.Pointed || s.Kind == EarKind.Tufted || s.Kind == EarKind.Long || s.Kind == EarKind.Elf || s.Kind == EarKind.Round || s.Kind == EarKind.Floppy)
+                {
+                    // high density: a flat, cupped ear (two plates around a fold line) with a lighter inner ear,
+                    // replacing the round cone that reads as a horn when it has many pixels
+                    outer.MaxDensity = Limbs.HdDensity;
+                    BuildHdEar(b, s, g, ear, tip, side, len, r0, r1, dirWorld);
                 }
                 if (s.Kind == EarKind.Tufted)
                 {

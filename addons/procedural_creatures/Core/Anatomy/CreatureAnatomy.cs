@@ -257,6 +257,7 @@ namespace PixelCreatures.Core.Anatomy
             horizontalRadius = 1; minY = 0; maxY = 1; minX = 0; maxX = 0;
             foreach (var p in prims)
             {
+                if (p.MinDensity > 1.0) continue;
                 var xa = skeleton.RestWorld(p.BoneA);
                 switch (p.Kind)
                 {

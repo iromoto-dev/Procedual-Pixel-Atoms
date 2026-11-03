@@ -67,6 +67,8 @@ namespace PixelCreatures.Core.Anatomy
         ShadowCaster = 512,
         /// <summary>Shell plates (tortoise carapace): seeded scutes with dark seams on an ellipsoid (uses FacetSeed).</summary>
         Scutes = 1024,
+        /// <summary>Triangle with explicit surface coordinates per vertex (UvA/UvB/UvC): faces of solids share one mapping.</summary>
+        UvMapped = 2048,
     }
 
     /// <summary>Material slots of a creature. The palette maps each slot to a ramp of shades.</summary>
@@ -120,6 +122,8 @@ namespace PixelCreatures.Core.Anatomy
         // Triangle: vertices A, B, C in bones A, B, C.
         public int BoneA = -1, BoneB = -1, BoneC = -1;
         public Vec3 LocalA, LocalB, LocalC;
+        /// <summary>Triangles with PrimFlags.UvMapped: surface coordinates (X = U along, Y = V across, world units) per vertex.</summary>
+        public Vec2 UvA, UvB, UvC;
         public double RadiusA, RadiusB;
         public Vec3 Radii;
         public Quat LocalRotation = Quat.Identity;
@@ -135,6 +139,17 @@ namespace PixelCreatures.Core.Anatomy
         public uint FacetSeed;
         /// <summary>Level of detail: primitive is skipped at render quality below this value.</summary>
         public int MinQuality;
+        /// <summary>
+        /// High density detail: the primitive is only drawn at a pixel density (ViewSpec.Density) of at least
+        /// this value (toes, finger joints, scale ridges, hair strands that would be sub-pixel noise at 1x).
+        /// Detail primitives never enlarge the canvas.
+        /// </summary>
+        public double MinDensity;
+        /// <summary>
+        /// Low density level of detail: when above 0, the primitive is only drawn below this density. Pairs with
+        /// a MinDensity primitive to swap a classic pixel shape for a high density one.
+        /// </summary>
+        public double MaxDensity;
 
         public PrimitiveDef Clone() => (PrimitiveDef)MemberwiseClone();
     }
@@ -212,6 +227,8 @@ namespace PixelCreatures.Core.Anatomy
         public double Brow;
         public MaterialSlot Material = MaterialSlot.Eye;
         public int Group = -1;
+        /// <summary>Only drawn at a pixel density of at least this value (see PrimitiveDef.MinDensity).</summary>
+        public double MinDensity;
     }
 
     /// <summary>Canvas large enough for every pose and direction of the creature.</summary>
@@ -226,6 +243,22 @@ namespace PixelCreatures.Core.Anatomy
         public CanvasSpec(int width, int height, int originX, int originY)
         {
             Width = width; Height = height; OriginX = originX; OriginY = originY;
+        }
+
+        /// <summary>
+        /// The canvas at a pixel density (output pixels per world unit, see ViewSpec.Density). Sizes stay
+        /// even so the origin remains centred; density 1 returns this instance.
+        /// </summary>
+        public CanvasSpec Scaled(double density)
+        {
+            if (!(density > 1.0)) return this;
+            int w = (int)Math.Ceiling(Width * density);
+            int h = (int)Math.Ceiling(Height * density);
+            if ((w & 1) == 1) w++;
+            if ((h & 1) == 1) h++;
+            int ox = w / 2;
+            int oy = (int)Math.Round(OriginY * density);
+            return new CanvasSpec(w, h, ox, Math.Min(h - 1, oy));
         }
 
         public override string ToString() => $"{Width}x{Height} origin ({OriginX},{OriginY})";

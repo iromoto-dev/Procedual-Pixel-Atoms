@@ -47,6 +47,14 @@ namespace PixelCreatures.Core.Shapes
         public Vec3 Pole;
         /// <summary>Skip the paw/foot/hoof shape (the caller attaches its own end piece, e.g. a pincer).</summary>
         public bool NoFoot;
+        /// <summary>Unguligrade: split (cloven) hoof of cattle, deer and pigs instead of a solid hoof.</summary>
+        public bool Cloven;
+        /// <summary>Number of toes drawn at high pixel density (0 = automatic from the style).</summary>
+        public int Toes;
+        /// <summary>Hair tuft around the fetlock/ankle at high density (0..1, heavy horses, yetis, griffins).</summary>
+        public double Feathering;
+        /// <summary>Muscle definition at high density (0 = none, 1 = athletic).</summary>
+        public double Muscle = 0.7;
     }
 
     public static class Limbs
@@ -230,6 +238,7 @@ namespace PixelCreatures.Core.Shapes
                     paw.DomainLength = len; paw.Tag = s.Name + ".paw";
                 }
             }
+            if (!s.NoFoot) BuildDetail(b, group, hip, knee, ankle, foot, s, l1, l2, l3, len, u1, u2);
             if (s.Claws > 0 && s.ClawSize > 0.2 && !s.Hand && !s.NoFoot)
             {
                 for (int i = 0; i < s.Claws; i++)
@@ -241,9 +250,156 @@ namespace PixelCreatures.Core.Shapes
                     claw.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
                     claw.MinQuality = 1;
                     claw.Tag = s.Name + ".claw";
+                    if (HasToes(s)) claw.MaxDensity = HdDensity;
                 }
             }
             return leg;
+        }
+
+        /// <summary>Pixel density from which the high density anatomy details are drawn.</summary>
+        public const double HdDensity = 1.5;
+
+        private static bool HasToes(LegSpec s) =>
+            !s.Hand && !s.IsArm && (s.Style == LegStyle.Digitigrade || s.Style == LegStyle.Plantigrade || s.Style == LegStyle.Sprawling);
+
+        private static PrimitiveDef Hd(PrimitiveDef p, string tag)
+        {
+            p.MinDensity = HdDensity;
+            p.Tag = tag;
+            return p;
+        }
+
+        /// <summary>
+        /// High density anatomy: muscle bellies on the upper and lower segments, joint knobs, separate toes
+        /// with claws, cloven or solid hooves with a coronet band and fetlock, and optional feathering. All
+        /// parts are drawn only at a pixel density of at least HdDensity, so classic sprites are unchanged.
+        /// </summary>
+        private static void BuildDetail(AnatomyBuilder b, int group, int hip, int knee, int ankle, int foot, LegSpec s,
+            double l1, double l2, double l3, double len, double u1, double u2)
+        {
+            var mat = s.Material;
+            bool arthropod = s.Style == LegStyle.Arthropod;
+            double m = DMath.Saturate(s.Muscle);
+            // bone frames: +X along the segment, +Y towards the creature front (theta 0 = front of the leg)
+            if (!arthropod && m > 0.05 && s.RadiusTop > 1.0)
+            {
+                // upper segment: a tapering muscle belly (thigh / upper arm), fuller at the back of hind legs
+                double back = s.Front ? 0.1 : -0.22;
+                var thigh = b.Ellipsoid(group, hip, new Vec3(l1 * 0.36, s.RadiusTop * back, 0),
+                    new Vec3(l1 * 0.42, s.RadiusTop * DMath.Lerp(0.95, 1.12, m), s.RadiusTop * DMath.Lerp(0.85, 0.98, m)), mat, PatternDomain.Limb, 0, u1, null, s.Side);
+                thigh.DomainLength = len;
+                Hd(thigh, s.Name + ".thigh");
+                // lower segment: calf (hind, at the back) or forearm muscle (front, at the front), tapering to the joint
+                double side = s.IsArm || s.Front ? 0.35 : -0.42;
+                double rk = s.RadiusKnee;
+                var calf = b.Ellipsoid(group, knee, new Vec3(l2 * 0.3, rk * side, 0),
+                    new Vec3(l2 * 0.32, rk * DMath.Lerp(0.95, 1.18, m), rk * DMath.Lerp(0.85, 1.0, m)), mat, PatternDomain.Limb, u1, u1 + (u2 - u1) * 0.5, null, s.Side);
+                calf.DomainLength = len;
+                Hd(calf, s.Name + ".calf");
+                // joint knobs: knee cap / elbow point and the hock or wrist
+                double kn = rk * 0.62;
+                var knob = b.Ellipsoid(group, knee, new Vec3(0, rk * (s.Front || s.IsArm ? -0.35 : 0.4), 0), new Vec3(kn, kn, kn * 0.9), mat, PatternDomain.Limb, u1 - 0.02, u1 + 0.02, null, s.Side);
+                knob.DomainLength = len;
+                Hd(knob, s.Name + ".kneecap");
+                if (s.Style == LegStyle.Digitigrade || s.Style == LegStyle.Unguligrade)
+                {
+                    double an = s.RadiusAnkle * 0.85;
+                    var hock = b.Ellipsoid(group, ankle, new Vec3(an * 0.2, s.Front ? an * 0.3 : -an * 0.55, 0), new Vec3(an, an * 0.9, an * 0.8), mat, PatternDomain.Limb, u2 - 0.02, u2 + 0.02, null, s.Side);
+                    hock.DomainLength = len;
+                    Hd(hock, s.Name + ".hock");
+                }
+            }
+            if (s.IsArm || s.Hand) return;
+
+            if (s.Style == LegStyle.Unguligrade)
+            {
+                double pr = s.PawRadius;
+                // pastern/fetlock: the joint above the hoof bulges at the back
+                var fet = b.Ellipsoid(group, foot, new Vec3(-pr * 0.25, pr * 1.15, 0), new Vec3(pr * 0.85, pr * 0.8, pr * 0.78), mat, PatternDomain.Limb, 0.93, 0.96, null, s.Side);
+                fet.DomainLength = len;
+                Hd(fet, s.Name + ".fetlock");
+                // coronet band: a slightly wider, darker rim at the top of the hoof
+                var cor = b.Cone(group, foot, new Vec3(0.1, pr * 0.62, 0), pr * 1.0, foot, new Vec3(pr * 0.35, pr * 0.58, 0), pr * 0.95, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                cor.ShadeBias = -2;
+                cor.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                Hd(cor, s.Name + ".coronet");
+                if (s.Cloven)
+                {
+                    // two toes with a dark cleft between them; dew claws at the back
+                    for (int t = -1; t <= 1; t += 2)
+                    {
+                        double z = t * pr * 0.4;
+                        var half = b.Cone(group, foot, new Vec3(0.1, pr * 0.32, z), pr * 0.55, foot, new Vec3(s.PawLength * 0.4, pr * 0.12, z * 1.08), pr * 0.45,
+                            MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                        half.ShadeBias = -1;
+                        half.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                        Hd(half, s.Name + ".hoofhalf");
+                        var dew = b.Ellipsoid(group, foot, new Vec3(-pr * 0.75, pr * 0.85, z * 0.9), new Vec3(pr * 0.3, pr * 0.22, pr * 0.2), MaterialSlot.Accent, PatternDomain.None, 0, 1, null, s.Side);
+                        dew.ShadeBias = -1;
+                        dew.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                        Hd(dew, s.Name + ".dewclaw");
+                    }
+                }
+                else
+                {
+                    // solid hoof: a lighter, slightly flared wall with a dark sole line
+                    var wall = b.Cone(group, foot, new Vec3(0.15, pr * 0.42, 0), pr * 0.9, foot, new Vec3(s.PawLength * 0.3, pr * 0.18, 0), pr * 1.0,
+                        MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                    wall.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                    Hd(wall, s.Name + ".hoofwall");
+                }
+                if (s.Feathering > 0.1) Feather(b, group, foot, s, pr, len);
+                return;
+            }
+            if (!HasToes(s)) return;
+
+            // toes: a row of beads along the front rim of the paw/foot, each with its own claw
+            int toes = s.Toes > 0 ? s.Toes : (s.Style == LegStyle.Plantigrade ? 5 : 4);
+            double pw = s.PawRadius;
+            bool flat = s.Style == LegStyle.Plantigrade || s.Style == LegStyle.Stump;
+            double tr = pw * (flat ? 0.34 : 0.4);
+            double front = flat ? l3 * 0.2 : s.PawLength * 0.62;
+            double spread = pw * (flat ? 1.05 : 0.95);
+            for (int i = 0; i < toes; i++)
+            {
+                double t = toes == 1 ? 0 : i / (double)(toes - 1) * 2 - 1;
+                double z = t * spread;
+                // the middle toes reach further forward
+                double x = front - Math.Abs(t) * pw * 0.45;
+                var toe = b.Ellipsoid(group, foot, new Vec3(x, pw * 0.05, z), new Vec3(tr * 1.25, tr * 0.95, tr), s.FootMaterial, PatternDomain.Limb, 0.97, 1.0, null, s.Side);
+                toe.DomainLength = len;
+                Hd(toe, s.Name + ".toe");
+                if (s.Claws > 0 && s.ClawSize > 0.2)
+                {
+                    Vec3 a = new Vec3(x + tr * 0.9, pw * 0.15, z);
+                    Vec3 tip = a + new Vec3(s.ClawSize * 0.95, -pw * 0.3 - 0.35, z * 0.08);
+                    var claw = b.Cone(group, foot, a, Math.Max(0.4, s.ClawSize * 0.32), foot, tip, 0.28, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                    claw.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
+                    Hd(claw, s.Name + ".toeclaw");
+                }
+            }
+            if (!flat)
+            {
+                // the large central pad behind the toes keeps the paw compact from below
+                var pad = b.Ellipsoid(group, foot, new Vec3(s.PawLength * 0.15, -pw * 0.05, 0), new Vec3(pw * 0.7, pw * 0.5, pw * 0.75), s.FootMaterial, PatternDomain.Limb, 0.96, 1.0, null, s.Side);
+                pad.DomainLength = len;
+                Hd(pad, s.Name + ".pad");
+            }
+            if (s.Feathering > 0.1) Feather(b, group, foot, s, pw, len);
+        }
+
+        /// <summary>Long hair around the ankle that falls over the foot (draft horses, yetis, owls' legs).</summary>
+        private static void Feather(AnatomyBuilder b, int group, int foot, LegSpec s, double pr, double len)
+        {
+            double f = DMath.Saturate(s.Feathering);
+            for (int k = -1; k <= 1; k++)
+            {
+                Vec3 a = new Vec3(-pr * 0.2, pr * (1.6 + f), k * pr * 0.55);
+                Vec3 tip = new Vec3(-pr * (0.6 + 0.4 * f), pr * 0.2, k * pr * 0.85);
+                var tuft = b.Cone(group, foot, a, pr * (0.55 + 0.25 * f), foot, tip, pr * 0.25, MaterialSlot.Hair, PatternDomain.Limb, 0.9, 0.97, s.Side);
+                tuft.DomainLength = len;
+                Hd(tuft, s.Name + ".feather");
+            }
         }
 
         private static void BuildHand(AnatomyBuilder b, int group, int wrist, int hand, LegSpec s, double len)
@@ -254,6 +410,33 @@ namespace PixelCreatures.Core.Shapes
             palm.DomainLength = len; palm.Tag = s.Name + ".palm";
             var wristC = b.Segment(group, wrist, s.RadiusAnkle, hand, s.PawRadius * 0.75, s.FootMaterial, PatternDomain.Limb, 0.8, 0.95, s.Side);
             wristC.DomainLength = len;
+            // high density: four curled fingers and a thumb instead of a mitt
+            double pr = s.PawRadius, pl = s.PawLength;
+            double fr = Math.Max(0.4, pr * 0.3);
+            for (int i = 0; i < 4; i++)
+            {
+                double z = (i / 3.0 - 0.5) * pr * 1.35;
+                double reach = pl * (0.55 + 0.12 * (1 - Math.Abs(i / 3.0 - 0.5) * 2));
+                Vec3 k0 = new Vec3(pl * 0.12, -pr * 0.05, z);
+                Vec3 k1 = new Vec3(pl * 0.12 + reach * 0.6, -pr * 0.25, z * 1.08);
+                Vec3 k2 = k1 + new Vec3(reach * 0.25, -reach * 0.38, 0);
+                var f1 = b.Cone(group, hand, k0, fr * 1.1, hand, k1, fr, s.FootMaterial, PatternDomain.Limb, 0.95, 1.0, s.Side);
+                var f2 = b.Cone(group, hand, k1, fr, hand, k2, fr * 0.8, s.FootMaterial, PatternDomain.Limb, 0.97, 1.0, s.Side);
+                f1.DomainLength = len; f2.DomainLength = len;
+                Hd(f1, s.Name + ".finger"); Hd(f2, s.Name + ".finger");
+                if (s.Claws > 0 && s.ClawSize > 0.2)
+                {
+                    var nail = b.Cone(group, hand, k2, Math.Max(0.35, fr * 0.6), hand, k2 + new Vec3(s.ClawSize * 0.35, -s.ClawSize * 0.55, 0), 0.25, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                    nail.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
+                    Hd(nail, s.Name + ".nail");
+                }
+            }
+            double ts = s.Side == 0 ? 1 : s.Side;
+            Vec3 t0 = new Vec3(-pl * 0.15, pr * 0.1, -ts * pr * 0.55);
+            Vec3 t1 = t0 + new Vec3(pl * 0.35, -pr * 0.15, -ts * pr * 0.55);
+            var thumb = b.Cone(group, hand, t0, fr * 1.25, hand, t1, fr * 0.85, s.FootMaterial, PatternDomain.Limb, 0.95, 1.0, s.Side);
+            thumb.DomainLength = len;
+            Hd(thumb, s.Name + ".thumb");
             if (s.Claws > 0 && s.ClawSize > 0.2)
             {
                 for (int i = 0; i < Math.Min(3, s.Claws); i++)
@@ -263,6 +446,7 @@ namespace PixelCreatures.Core.Shapes
                         new Vec3(s.PawLength * 0.2 + s.ClawSize, -s.PawRadius * 0.7, zo * 1.1), 0.3, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
                     claw.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
                     claw.MinQuality = 1;
+                    claw.MaxDensity = HdDensity;
                 }
             }
         }

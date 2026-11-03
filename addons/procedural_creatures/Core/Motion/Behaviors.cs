@@ -244,6 +244,7 @@ namespace PixelCreatures.Core.Motion
                 ActionStyle.TailSwipe => 1.0,
                 ActionStyle.Spray => 1.3,
                 ActionStyle.Rear => 1.25,
+                ActionStyle.Shake => 1.1,
                 _ => 0.9,
             } * ts;
         }
@@ -466,6 +467,20 @@ namespace PixelCreatures.Core.Motion
                     if (u > 0.05 && u < 0.9) p.Mood = EyeMood.Angry;
                     break;
                 }
+                case ActionStyle.Shake:
+                {
+                    // rustle: the whole object trembles about its base, branches lash, lids and maws open
+                    double e = Curves.Window(u, 0.0, 0.12, 0.6, 0.95);
+                    p.BodyRoll += Curves.Shake(u, 0.05, 0.9, 7) * 0.05 * e;
+                    p.SpineYaw += Curves.Shake(u, 0.08, 0.9, 6) * 0.08 * e;
+                    p.SpinePitch += Curves.Shake(u, 0.1, 0.9, 5) * 0.06 * e;
+                    p.TentacleAmp += 0.9 * e;
+                    p.TentaclePhase += u * 14.0;
+                    p.Jaw = Math.Max(p.Jaw, Curves.Window(u, 0.08, 0.3, 0.7, 0.92));
+                    p.Squash += 0.05 * Curves.Window(u, 0.0, 0.1, 0.2, 0.35) - 0.04 * Curves.Window(u, 0.25, 0.35, 0.5, 0.65);
+                    if (u > 0.1 && u < 0.8) p.Mood = EyeMood.Angry;
+                    break;
+                }
                 case ActionStyle.Spray:
                 {
                     double charge = Curves.Window(u, 0.0, 0.3, 0.35, 0.42);
@@ -670,6 +685,15 @@ namespace PixelCreatures.Core.Motion
                     p.LegTuck = Math.Max(p.LegTuck, w * 0.7);
                     p.Crouch = DMath.Lerp(p.Crouch, 0.7, body);
                     p.HeadPitch += -0.3 * head;
+                    break;
+                }
+                case RestStyle.Dormant:
+                {
+                    // stationary objects: calm wind, closed lids, a slight droop of the crown
+                    p.TentacleAmp *= 1 - 0.65 * body;
+                    p.Jaw *= 1 - body;
+                    p.SpinePitch += -0.03 * body;
+                    p.Extra0 = Math.Max(p.Extra0, body);
                     break;
                 }
             }

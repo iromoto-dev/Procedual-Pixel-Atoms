@@ -20,7 +20,12 @@ namespace PixelCreatures.Core
         /// folded wings, new archetypes and shapes).
         /// </summary>
         public const int GeneratorVersion = 2;
-        public const string FrameworkVersion = "1.0.0";
+        public const string FrameworkVersion = "1.1.0";
+        /// <summary>
+        /// Recommended pixel density (output pixels per world unit) for HD sprites: shapes, features and
+        /// high density anatomy details are rasterized at twice the classic resolution. See ViewSpec.Density.
+        /// </summary>
+        public const double HdDensity = 2.0;
     }
 
     /// <summary>
@@ -171,9 +176,11 @@ namespace PixelCreatures.Core
                 _palette.Put(pKey, palette);
             }
             ulong sKey = StableHash.Combine(genome.PatternKey, (ulong)CreatureFramework.GeneratorVersion);
+            if (family is ISurfaceCustomizer) sKey = StableHash.Combine(sKey, StableHash.Fnv1a64(family.Id));
             if (!_surface.TryGet(sKey, out var surface))
             {
                 surface = SurfaceBuilder.Build(genome);
+                if (family is ISurfaceCustomizer customizer) customizer.CustomizeSurface(genome, surface);
                 _surface.Put(sKey, surface);
             }
             ulong mKey = StableHash.Combine(StableHash.Combine(genome.MotionKey, genome.AnatomyKey), (ulong)CreatureFramework.GeneratorVersion);

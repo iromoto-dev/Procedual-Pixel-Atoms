@@ -12,6 +12,7 @@ namespace PixelCreatures.Core
         public static void RegisterAll(CreatureRegistry r)
         {
             r.RegisterPaletteRule(new DefaultPaletteRule());
+            r.RegisterPaletteRule(new FloraPaletteRule());
             foreach (var m in MaterialStyles.All) r.RegisterMaterial(m);
             BuiltInBlocks.RegisterAll(r);
             r.RegisterLocomotion("legged", () => new LeggedLocomotion());
@@ -20,6 +21,7 @@ namespace PixelCreatures.Core
             r.RegisterLocomotion("serpentine", () => new SerpentineLocomotion());
             r.RegisterLocomotion("hop", () => new HopLocomotion());
             r.RegisterLocomotion("float", () => new FloatLocomotion());
+            r.RegisterLocomotion(RootedLocomotion.ModuleId, () => new RootedLocomotion());
             r.RegisterFamily(new QuadrupedFamily());
             r.RegisterFamily(new BipedFamily());
             r.RegisterFamily(new ReptileFamily());
@@ -28,6 +30,8 @@ namespace PixelCreatures.Core
             r.RegisterFamily(new SerpentFamily());
             r.RegisterFamily(new AquaticFamily());
             r.RegisterFamily(new AmorphousFamily());
+            r.RegisterFamily(new FloraFamily());
+            r.RegisterFamily(new PropFamily());
         }
     }
 }

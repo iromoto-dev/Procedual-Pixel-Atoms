@@ -141,6 +141,12 @@ namespace PixelCreatures.Core.Palettes
         Feathers,
         Bark,
         Spots,
+        /// <summary>Leaf clumps: rounded clusters with lit tops and dark gaps (tree canopies, bushes).</summary>
+        Foliage,
+        /// <summary>Wood: plank seams across the part and fine grain along it (crates, barrels, doors).</summary>
+        Planks,
+        /// <summary>Masonry: offset rows of blocks with mortar seams (pillars, walls, gravestones).</summary>
+        Masonry,
     }
 
     /// <summary>Built-in material styles. Extensions can register more in the CreatureRegistry.</summary>
@@ -163,6 +169,15 @@ namespace PixelCreatures.Core.Palettes
         /// <summary>Polished metal: hard terminator and a broad specular glint.</summary>
         public static readonly MaterialStyle Metal = new MaterialStyle("metal", "Metal", 0.05, 0.6, 0.3, 0.04, 0.9);
 
-        public static IEnumerable<MaterialStyle> All => new[] { Fur, Hide, Scales, Chitin, Stone, Slime, Feather, Horn, Membrane, Matte, Glossy, Emissive, Bark, Leaf, Metal };
+        /// <summary>Tree canopies and bushes: soft wrap lighting with clumped leaf texture.</summary>
+        public static readonly MaterialStyle Foliage = new MaterialStyle("foliage", "Foliage", 0.3, 0.56, 0.2, -0.1, 2.0, SurfaceTexture.Foliage);
+        /// <summary>Worked wood with planks and grain.</summary>
+        public static readonly MaterialStyle Wood = new MaterialStyle("wood", "Wood", 0.22, 0.6, 0.24, -0.06, 2.0, SurfaceTexture.Planks);
+        /// <summary>Cut stone blocks with mortar seams.</summary>
+        public static readonly MaterialStyle Masonry = new MaterialStyle("masonry", "Masonry", 0.15, 0.6, 0.26, -0.02, 2.0, SurfaceTexture.Masonry);
+        /// <summary>Gems and crystals: hard facets and a strong glint.</summary>
+        public static readonly MaterialStyle Crystal = new MaterialStyle("crystal", "Crystal", 0.12, 0.55, 0.25, -0.02, 0.86, SurfaceTexture.None, faceted: true);
+
+        public static IEnumerable<MaterialStyle> All => new[] { Fur, Hide, Scales, Chitin, Stone, Slime, Feather, Horn, Membrane, Matte, Glossy, Emissive, Bark, Leaf, Metal, Foliage, Wood, Masonry, Crystal };
     }
 }

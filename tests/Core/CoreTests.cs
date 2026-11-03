@@ -110,6 +110,8 @@ namespace PixelCreatures.Tests
                 ctx.Equal(AnatomyHash(a1), AnatomyHash(a2), $"{f.Id}: anatomy geometry after colour change");
                 var patterned = g.With("pattern.density", 1 - g.Get("pattern.density"));
                 ctx.Equal(AnatomyHash(a1), AnatomyHash(f.BuildAnatomy(patterned, reg)), $"{f.Id}: anatomy after pattern change");
+                // stationary families (flora, props) have no motion genes
+                if (!g.Schema.Contains("motion.energy")) continue;
                 var moved = g.With("motion.energy", 1 - g.Get("motion.energy"));
                 ctx.Equal(g.AnatomyKey, moved.AnatomyKey, $"{f.Id}: anatomy key must ignore motion genes");
             }

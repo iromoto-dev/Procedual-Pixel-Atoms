@@ -64,6 +64,10 @@ namespace PixelCreatures.Core.Rendering
             public double U0, U1, DomainLength;
             public uint FacetSeed;
             public bool Hard;
+            /// <summary>High density fur/feather silhouette breakup amplitude in pixels (0 = smooth edge).</summary>
+            public double Fuzz;
+            /// <summary>Tuft period along the part in pixels.</summary>
+            public double FuzzPeriod;
             // bbox (pixel coords, inclusive)
             public int X0, Y0, X1, Y1;
             // ellipsoid
@@ -85,6 +89,7 @@ namespace PixelCreatures.Core.Rendering
             public Vec3 N;
             public bool BackFace;
             public double Area2;
+            public Vec2 Ua, Ub, Uc;
         }
 
         private PPrim[] _pp = new PPrim[64];
@@ -123,9 +128,17 @@ namespace PixelCreatures.Core.Rendering
         private Vec3 _lateralView;
         private Vec3 _forwardView;
         private Mat3 _creatureToView;
+        /// <summary>Creature space to output pixels: the view rotation times the pixel density.</summary>
+        private Mat3 _creatureToPixels;
+        /// <summary>Output pixels per world unit (ViewSpec.Density).</summary>
+        private double _s = 1;
         private Vec3 _offsetView;
         private Vec3 _groundOffsetView;
         private double _patternScale = 1;
+        /// <summary>Scale of micro textures in output pixels (grows slower than the density: more, finer detail).</summary>
+        private double _textureScale = 1;
+        /// <summary>Micro texture contrast: more room for strands and scales at high density.</summary>
+        private double _textureBoost = 1;
         private int _ox, _oy;
 
         public RenderOptions Options { get; set; } = RenderOptions.Default;
@@ -158,17 +171,21 @@ namespace PixelCreatures.Core.Rendering
             Mark(0);
 
             var wv = PixelCamera.WorldToView(view.Elevation);
+            _s = view.PixelDensity;
             _creatureToView = wv * PixelCamera.YawRotation(view.Yaw);
-            _offsetView = wv.Mul(view.RootOffset);
-            _groundOffsetView = wv.Mul(new Vec3(view.RootOffset.X, 0, view.RootOffset.Z));
+            _creatureToPixels = _creatureToView * Mat3.Diagonal(_s, _s, _s);
+            _offsetView = wv.Mul(view.RootOffset) * _s;
+            _groundOffsetView = wv.Mul(new Vec3(view.RootOffset.X, 0, view.RootOffset.Z)) * _s;
             _lightView = wv.Mul(PixelCamera.WorldLight).Normalized();
             _halfView = (_lightView + Vec3.UnitZ).Normalized();
             _lateralView = _creatureToView.Mul(Vec3.UnitZ);
             _forwardView = _creatureToView.Mul(Vec3.UnitX);
 
-            _patternScale = anatomy.Metrics.PatternScale;
+            _patternScale = anatomy.Metrics.PatternScale * _s;
+            _textureScale = anatomy.Metrics.PatternScale * DMath.Pow(_s, 0.6);
+            _textureBoost = DMath.Clamp(1.0 + 0.55 * (_s - 1.0), 1.0, 1.9);
             PrepareBones(pose.Skeleton);
-            PreparePrimitives(anatomy, view.Quality, ref stats);
+            PreparePrimitives(anatomy, surface, view.Quality, ref stats);
             Mark(1);
             RasterGroups(anatomy, ref stats);
             WorkRegion(out _dx0, out _dy0, out _dx1, out _dy1);
@@ -262,23 +279,23 @@ namespace PixelCreatures.Core.Rendering
             for (int i = 0; i < n; i++)
             {
                 var w = pose.World[i];
-                var basis = _creatureToView * w.Basis;
-                _boneView[i] = new Xform(basis, _creatureToView.Mul(w.Origin) + _offsetView);
+                var basis = _creatureToPixels * w.Basis;
+                _boneView[i] = new Xform(basis, _creatureToPixels.Mul(w.Origin) + _offsetView);
                 double det = Math.Abs(w.Basis.Determinant);
-                _boneScale[i] = det > 1e-9 ? DMath.Cbrt(det) : 1.0;
+                _boneScale[i] = (det > 1e-9 ? DMath.Cbrt(det) : 1.0) * _s;
             }
         }
 
         // ------------------------------------------------------------------ primitive preparation
 
-        private void PreparePrimitives(CreatureAnatomy anatomy, int quality, ref RenderStats stats)
+        private void PreparePrimitives(CreatureAnatomy anatomy, SurfaceSpec surface, int quality, ref RenderStats stats)
         {
             var prims = anatomy.Primitives;
             _ppCount = 0;
             for (int i = 0; i < prims.Count; i++)
             {
                 var d = prims[i];
-                if (d.MinQuality > quality) continue;
+                if (d.MinQuality > quality || d.MinDensity > _s + 1e-9 || (d.MaxDensity > 0 && _s >= d.MaxDensity - 1e-9)) continue;
                 ref var p = ref _pp[_ppCount];
                 p = default;
                 p.Kind = d.Kind;
@@ -291,7 +308,7 @@ namespace PixelCreatures.Core.Rendering
                 p.Domain = d.Domain;
                 p.U0 = d.U0;
                 p.U1 = d.U1;
-                p.DomainLength = d.DomainLength;
+                p.DomainLength = d.DomainLength * _s;
                 p.FacetSeed = d.FacetSeed;
                 p.Hard = (d.Flags & PrimFlags.Hard) != 0;
                 bool ok;
@@ -306,6 +323,7 @@ namespace PixelCreatures.Core.Rendering
                     stats.NonFiniteRejected++;
                     continue;
                 }
+                if (_s >= 1.5 && Options.MicroTexture) PrepareFuzz(ref p, surface);
                 // the prepared bbox already carries one pixel of margin for the outline
                 if (p.X0 < 0) { stats.Overflow = true; stats.OverflowLeft = Math.Max(stats.OverflowLeft, -p.X0); }
                 if (p.Y0 < 0) { stats.Overflow = true; stats.OverflowTop = Math.Max(stats.OverflowTop, -p.Y0); }
@@ -326,6 +344,49 @@ namespace PixelCreatures.Core.Rendering
                 int g = _pp[i].Group;
                 _groupList[_groupStart[g] + _groupCount[g]++] = i;
             }
+        }
+
+        /// <summary>
+        /// Fur and feathers break up the silhouette at high pixel density: edge pixels are pushed in or out by
+        /// a saw-tooth evaluated in surface coordinates (so the tufts stay glued to the body and point along
+        /// the part). Thin, hard and small parts keep clean edges.
+        /// </summary>
+        private void PrepareFuzz(ref PPrim p, SurfaceSpec surface)
+        {
+            p.Fuzz = 0;
+            if (p.Hard || p.Kind == PrimKind.Triangle || (p.Flags & (PrimFlags.Thin | PrimFlags.Faceted | PrimFlags.Scutes)) != 0) return;
+            if (p.Domain == PatternDomain.None || p.Domain == PatternDomain.Wing || p.Domain == PatternDomain.Fin || p.Domain == PatternDomain.Horn) return;
+            var slot = p.Material;
+            if (slot != MaterialSlot.Primary && slot != MaterialSlot.Secondary && slot != MaterialSlot.Marking && slot != MaterialSlot.White && slot != MaterialSlot.Hair) return;
+            var tex = surface.StyleOf(slot).Texture;
+            double k;
+            switch (tex)
+            {
+                case SurfaceTexture.Fur: k = slot == MaterialSlot.Hair ? 1.25 : 1.0; break;
+                case SurfaceTexture.Feathers: k = 0.55; break;
+                case SurfaceTexture.Bark: k = 0.35; break;
+                case SurfaceTexture.Foliage: k = 1.35; break;
+                default: return;
+            }
+            double size = p.Kind == PrimKind.Ellipsoid ? p.RMin : Math.Min(p.Ra, p.Rb);
+            if (size < 2.4) return;
+            double amount = slot == MaterialSlot.Hair ? 1.0 : DMath.Lerp(0.55, 1.0, surface.TextureAmount);
+            p.Fuzz = Math.Min(Math.Min(2.4, size * 0.3), (_s - 1.0) * 1.25) * k * amount;
+            p.FuzzPeriod = tex == SurfaceTexture.Foliage ? 3.0 + 1.6 * _s : 2.2 + 1.1 * _s;
+        }
+
+        /// <summary>Signed silhouette offset of the fur tufts at a pixel near the edge (positive = grows outward).</summary>
+        private double FuzzOffset(ref PPrim p, double vx, double vy, double sd)
+        {
+            double z;
+            if (sd <= 0) Front(ref p, vx, vy, out z, out _);
+            else Rim(ref p, vx, vy, out z, out _);
+            var sp = SurfaceAt(ref p, vx, vy, z);
+            double per = p.FuzzPeriod;
+            double row = Math.Floor(sp.V / per);
+            double t = DMath.Frac(sp.U / per + 0.61 * row + 0.37 * StableHash.Hash01(p.FacetSeed + (uint)p.Source * 977u, (int)row, 3));
+            // saw-tooth: a sharp tuft tip followed by a notch
+            return p.Fuzz * (t * t * 1.35 - 0.5);
         }
 
         private bool PrepareEllipsoid(ref PPrim p, PrimitiveDef d)
@@ -405,6 +466,7 @@ namespace PixelCreatures.Core.Rendering
             if (p.BackFace) n = -n;
             p.N = n;
             p.Area2 = (p1.X - p0.X) * (p2.Y - p0.Y) - (p1.Y - p0.Y) * (p2.X - p0.X);
+            if ((d.Flags & PrimFlags.UvMapped) != 0) { p.Ua = d.UvA * _s; p.Ub = d.UvB * _s; p.Uc = d.UvC * _s; }
             double t = PlateHalfThickness;
             SetBox(ref p, Math.Min(p0.X, Math.Min(p1.X, p2.X)) - t, Math.Min(p0.Y, Math.Min(p1.Y, p2.Y)) - t,
                 Math.Max(p0.X, Math.Max(p1.X, p2.X)) + t, Math.Max(p0.Y, Math.Max(p1.Y, p2.Y)) + t);
@@ -677,15 +739,16 @@ namespace PixelCreatures.Core.Rendering
                 if (count == 0) continue;
                 int start = _groupStart[g];
                 var grp = groups[g];
-                double k = grp.BlendRadius;
+                double k = grp.BlendRadius * _s;
                 double invTwoK = k > 0 ? 1.0 / (2.0 * k) : 0;
                 int pad = (int)Math.Ceiling(k);
                 int gx0 = int.MaxValue, gy0 = int.MaxValue, gx1 = int.MinValue, gy1 = int.MinValue;
                 for (int j = 0; j < count; j++)
                 {
                     ref var p = ref _pp[_groupList[start + j]];
-                    gx0 = Math.Min(gx0, p.X0 - pad); gy0 = Math.Min(gy0, p.Y0 - pad);
-                    gx1 = Math.Max(gx1, p.X1 + pad); gy1 = Math.Max(gy1, p.Y1 + pad);
+                    int fp = p.Fuzz > 0 ? 1 : 0;
+                    gx0 = Math.Min(gx0, p.X0 - pad - fp); gy0 = Math.Min(gy0, p.Y0 - pad - fp);
+                    gx1 = Math.Max(gx1, p.X1 + pad + fp); gy1 = Math.Max(gy1, p.Y1 + pad + fp);
                 }
                 gx0 = Math.Max(0, gx0); gy0 = Math.Max(0, gy0);
                 gx1 = Math.Min(_w - 1, gx1); gy1 = Math.Min(_h - 1, gy1);
@@ -709,6 +772,7 @@ namespace PixelCreatures.Core.Rendering
                     ref var p = ref _pp[pi];
                     bool blend = k > 0 && !p.Hard;
                     int ppad = blend ? pad : 0;
+                    if (p.Fuzz > 0) ppad += 1;
                     int x0 = Math.Max(gx0, p.X0 - ppad), x1 = Math.Min(gx1, p.X1 + ppad);
                     int y0 = Math.Max(gy0, p.Y0 - ppad), y1 = Math.Min(gy1, p.Y1 + ppad);
                     byte pflag = (byte)((p.Kind == PrimKind.Triangle && p.BackFace ? AccBack : 0) | ((p.Flags & PrimFlags.Thin) != 0 ? AccThin : 0));
@@ -722,6 +786,7 @@ namespace PixelCreatures.Core.Rendering
                             int a = row + px;
                             stats.PixelsTested++;
                             double sd = Sd2D(ref p, vx, vy);
+                            if (p.Fuzz > 0 && sd > -p.Fuzz && sd < p.Fuzz) sd -= FuzzOffset(ref p, vx, vy, sd);
                             if (sd <= 0)
                             {
                                 Front(ref p, vx, vy, out double z, out Vec3 n);
@@ -773,7 +838,7 @@ namespace PixelCreatures.Core.Rendering
                 }
 
                 // resolve: z-test the group against what is already in the frame
-                double bias = grp.DepthBias;
+                double bias = grp.DepthBias * _s;
                 byte noOutline = (grp.Flags & GroupFlags.NoOutline) != 0 ? FlagNoOutline : (byte)0;
                 for (int py = gy0; py <= gy1; py++)
                 {
@@ -951,7 +1016,7 @@ namespace PixelCreatures.Core.Rendering
                     bool hasSurface = p.Domain != PatternDomain.None;
                     if (hasSurface)
                     {
-                        sp = SurfaceAt(ref p, vx, vy, _z[i] - grp.DepthBias);
+                        sp = SurfaceAt(ref p, vx, vy, _z[i] - grp.DepthBias * _s);
                         if ((p.Flags & PrimFlags.NoPattern) == 0) slot = surface.Evaluate(sp, slot, ref bias, _patternScale);
                     }
 
@@ -969,14 +1034,14 @@ namespace PixelCreatures.Core.Rendering
                         if (Options.MicroTexture && hasSurface && slot == MaterialSlot.Hair)
                         {
                             // hair and beards always show their tufts
-                            ndl += TextureLightOffset(style.Texture, surface, sp, _patternScale, Math.Max(0.85, surface.TextureAmount));
+                            ndl += TextureLightOffset(style.Texture, surface, sp, _textureScale, Math.Max(0.85, surface.TextureAmount));
                         }
                         else if (Options.MicroTexture && hasSurface && surface.TextureAmount > 0.05 &&
                             (slot == MaterialSlot.Primary || slot == MaterialSlot.Secondary || slot == MaterialSlot.Marking || slot == MaterialSlot.White))
                         {
                             // structured modulation of the lighting term: band edges become tufts,
                             // scales or plates instead of random speckles
-                            ndl += TextureLightOffset(style.Texture, surface, sp, _patternScale);
+                            ndl += TextureLightOffset(style.Texture, surface, sp, _textureScale) * _textureBoost;
                         }
                         bool seam = false, scutes = (p.Flags & PrimFlags.Scutes) != 0 && p.Kind == PrimKind.Ellipsoid && hasSurface;
                         if (scutes) ndl += ScuteOffset(ref p, sp, out seam);
@@ -1013,9 +1078,10 @@ namespace PixelCreatures.Core.Rendering
         {
             WorkRegion(out int rx0, out int ry0, out int rx1, out int ry1);
             Vec3 l = _lightView;
-            double size = DMath.Clamp(_patternScale, 0.6, 1.8);
+            double size = DMath.Clamp(_patternScale / _s, 0.6, 1.8) * _s;
             double maxT = Options.ContactShadowLength * size;
             double thickness = 18.0 * size;
+            double minGap = _s;
             int shaded = 0;
             for (int y = ry0; y <= ry1; y++)
             {
@@ -1038,7 +1104,7 @@ namespace PixelCreatures.Core.Rendering
                         int j = sy * _w + sx;
                         if ((_pflags[j] & FlagCovered) == 0 || _prim[j] == prim) continue;
                         double gap = _z[j] - (z + l.Z * t);
-                        hit = gap > 1.0 && gap < thickness;
+                        hit = gap > minGap && gap < thickness;
                     }
                     if (!hit) continue;
                     _level[i] = (sbyte)Math.Max(Shade.Shadow, _level[i] - 1);
@@ -1124,6 +1190,13 @@ namespace PixelCreatures.Core.Rendering
                     sp.T = tn;
                     sp.U = tn * len;
                     sp.V = (l2 - l1) * len * 0.5;
+                    if ((p.Flags & PrimFlags.UvMapped) != 0)
+                    {
+                        double l0 = 1 - l1 - l2;
+                        sp.U = l0 * p.Ua.X + l1 * p.Ub.X + l2 * p.Uc.X;
+                        sp.V = l0 * p.Ua.Y + l1 * p.Ub.Y + l2 * p.Uc.Y;
+                        sp.T = DMath.Saturate(sp.U / len);
+                    }
                     sp.Theta = 0;
                     sp.Local = new Vec3(l1, l2, 0);
                     sp.Side = 1;
@@ -1239,6 +1312,46 @@ namespace PixelCreatures.Core.Rendering
                     double n = PatternNoise.Perlin2(surface.Seed, v * 0.55, u * 0.1);
                     return n * 0.45 * amt;
                 }
+                case SurfaceTexture.Foliage:
+                {
+                    // leaf clumps: jittered cells, each a lit rounded clump with a dark rim (gaps between leaves)
+                    double cell = 3.4;
+                    double gu = u / cell, gv = v / cell;
+                    int cu = (int)Math.Floor(gu), cv = (int)Math.Floor(gv);
+                    double f1 = 9, f2 = 9;
+                    for (int dv = -1; dv <= 1; dv++)
+                        for (int du = -1; du <= 1; du++)
+                        {
+                            int iu = cu + du, iv = cv + dv;
+                            double ou = iu + 0.5 + (StableHash.Hash01(surface.Seed, iu, iv, 31) - 0.5) * 0.7;
+                            double ov = iv + 0.5 + (StableHash.Hash01(surface.Seed, iu, iv, 37) - 0.5) * 0.7;
+                            double d = (gu - ou) * (gu - ou) + (gv - ov) * (gv - ov);
+                            if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) f2 = d;
+                        }
+                    double edge = Math.Sqrt(f2) - Math.Sqrt(f1);
+                    return (edge < 0.18 ? -0.34 : 0.1 - Math.Sqrt(f1) * 0.25) * Math.Max(0.6, amt);
+                }
+                case SurfaceTexture.Planks:
+                {
+                    // boards run along the part (U); seams across V, fine grain lines inside each board
+                    double board = 4.2;
+                    double row = Math.Floor(v / board);
+                    double fv = DMath.Frac(v / board);
+                    if (fv < 0.2) return -0.42 * Math.Max(0.7, amt);
+                    double grain = PatternNoise.Perlin2(surface.Seed + (ulong)(long)row * 7919UL, u * 0.08, v * 0.9);
+                    return (grain > 0.28 ? -0.18 : 0.04) * amt;
+                }
+                case SurfaceTexture.Masonry:
+                {
+                    // blocks of 2:1 in offset courses with one pixel mortar joints
+                    double hgt = 3.6, wid = 6.4;
+                    double course = Math.Floor(u / hgt);
+                    double off = (((long)course & 1) == 0) ? 0 : 0.5;
+                    double fu = DMath.Frac(u / hgt), fv = DMath.Frac(v / wid + off);
+                    if (fu < 0.24 || fv < 0.12) return -0.45 * Math.Max(0.7, amt);
+                    double n = StableHash.Hash01(surface.Seed, (int)course, (int)Math.Floor(v / wid + off), 5) - 0.5;
+                    return n * 0.22 * amt;
+                }
             }
             return 0;
         }
@@ -1337,8 +1450,9 @@ namespace PixelCreatures.Core.Rendering
             // interior contours: a pixel directly behind a nearer part (other group) becomes a line
             if (Options.InteriorContours)
             {
-                double tau = Options.ContourDepth;
-                double tauSelf = Options.SelfContourDepth;
+                double tau = Options.ContourDepth * _s;
+                double tauSelf = Options.SelfContourDepth * _s;
+                double fullOutlineGap = 6.0 * _s;
                 for (int y = ry0; y <= ry1; y++)
                 {
                     for (int x = rx0; x <= rx1; x++)
@@ -1360,7 +1474,7 @@ namespace PixelCreatures.Core.Rendering
                             var grpJ = groups[gj];
                             if ((grpJ.Flags & GroupFlags.NoContour) != 0) continue;
                             double gap = _z[j] - zi;
-                            bool edge = gj != g ? gap > tau : gap > tauSelf + groups[g].BlendRadius;
+                            bool edge = gj != g ? gap > tau : gap > tauSelf + groups[g].BlendRadius * _s;
                             if (!edge) continue;
                             if (_z[j] > frontZ) { frontZ = _z[j]; frontNeighbour = j; }
                         }
@@ -1368,7 +1482,7 @@ namespace PixelCreatures.Core.Rendering
                         double depthGap = frontZ - zi;
                         var backMat = (MaterialSlot)_mat[i];
                         // soft contour for touching parts, full outline for clear separations
-                        byte c = depthGap > 6.0 || _level[i] <= Shade.Deep
+                        byte c = depthGap > fullOutlineGap || _level[i] <= Shade.Deep
                             ? palette.Index((MaterialSlot)_mat[frontNeighbour], Shade.Outline)
                             : palette.Index(backMat, Shade.Deep);
                         output[i] = c;
@@ -1420,6 +1534,7 @@ namespace PixelCreatures.Core.Rendering
             for (int fi = 0; fi < feats.Count; fi++)
             {
                 var f = feats[fi];
+                if (f.MinDensity > _s + 1e-9) continue;
                 var bv = _boneView[f.Bone];
                 Vec3 pos = bv.Point(f.LocalPosition);
                 Vec3 nrm = bv.Dir(f.LocalNormal).NormalizedOr(Vec3.UnitZ);
@@ -1431,8 +1546,8 @@ namespace PixelCreatures.Core.Rendering
                 // occlusion: the feature must sit on (or just below) the visible surface
                 int ci = cy * _w + cx;
                 if ((_pflags[ci] & FlagCovered) == 0) continue;
-                if (_z[ci] > pos.Z + 1.6 + f.Size * 0.3) continue;
                 double scale = _boneScale[f.Bone];
+                if (_z[ci] > pos.Z + 1.6 * _s + f.Size * scale * 0.3) continue;
 
                 switch (f.Kind)
                 {
@@ -1712,7 +1827,7 @@ namespace PixelCreatures.Core.Rendering
                 if (p.Kind == PrimKind.Ellipsoid)
                 {
                     cw = pose.Skeleton.World[def.BoneA].Point(def.LocalA);
-                    r = Math.Sqrt(def.Radii.X * def.Radii.Z) * _boneScale[def.BoneA];
+                    r = Math.Sqrt(def.Radii.X * def.Radii.Z) * _boneScale[def.BoneA] / _s;
                 }
                 else
                 {
@@ -1752,8 +1867,8 @@ namespace PixelCreatures.Core.Rendering
             }
             foreach (var (bx, bz, br, bw) in _shadowBlobs)
             {
-                Vec3 c = _creatureToView.Mul(new Vec3(bx, 0, bz)) + _groundOffsetView;
-                double rx = br * 1.35, ry = Math.Max(1.0, br * 1.35 * sinE);
+                Vec3 c = _creatureToPixels.Mul(new Vec3(bx, 0, bz)) + _groundOffsetView;
+                double rx = br * 1.35 * _s, ry = Math.Max(1.0, br * 1.35 * sinE * _s);
                 double scx = _ox + c.X, scy = _oy - c.Y;
                 int x0 = Math.Max(0, (int)Math.Floor(scx - rx)), x1 = Math.Min(_w - 1, (int)Math.Ceiling(scx + rx));
                 int y0 = Math.Max(0, (int)Math.Floor(scy - ry)), y1 = Math.Min(_h - 1, (int)Math.Ceiling(scy + ry));
@@ -1781,6 +1896,7 @@ namespace PixelCreatures.Core.Rendering
             var output = frame.Indices;
             var sub = frame.Submerged;
             var inv = _creatureToView.Transposed;
+            double invS = 1.0 / _s;
             bool any = false;
             WorkRegion(out int rx0, out int ry0, out int rx1, out int ry1);
             for (int y = ry0; y <= ry1; y++)
@@ -1791,7 +1907,7 @@ namespace PixelCreatures.Core.Rendering
                     int i = y * _w + x;
                     if ((_pflags[i] & FlagCovered) == 0) continue;
                     double vx = x + 0.5 - _ox;
-                    Vec3 v = new Vec3(vx, vy, _z[i]) - _offsetView;
+                    Vec3 v = (new Vec3(vx, vy, _z[i]) - _offsetView) * invS;
                     Vec3 c = inv.Mul(v);
                     if (c.Y < view.WaterLevel)
                     {
