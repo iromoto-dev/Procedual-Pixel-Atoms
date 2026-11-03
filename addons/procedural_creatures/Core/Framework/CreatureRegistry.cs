@@ -21,6 +21,7 @@ namespace PixelCreatures.Core
         private readonly Dictionary<string, MaterialStyle> _materials = new Dictionary<string, MaterialStyle>(StringComparer.Ordinal);
         private readonly Dictionary<string, IShapeBlock> _shapeBlocks = new Dictionary<string, IShapeBlock>(StringComparer.Ordinal);
         private readonly Dictionary<string, Func<ILocomotionModule>> _locomotion = new Dictionary<string, Func<ILocomotionModule>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Biome> _biomes = new Dictionary<string, Biome>(StringComparer.Ordinal);
         private readonly List<string> _extensions = new List<string>();
         private readonly object _lock = new object();
 
@@ -89,6 +90,31 @@ namespace PixelCreatures.Core
             {
                 lock (_lock) return _families.Values.OrderBy(f => f.Order).ThenBy(f => f.Id, StringComparer.Ordinal).ToList();
             }
+        }
+
+        // ------------------------------------------------------------------ biomes
+
+        /// <summary>Registers (or replaces) a biome. Biomes must not be changed after registration.</summary>
+        public void RegisterBiome(Biome biome)
+        {
+            lock (_lock) _biomes[biome.Id] = biome;
+        }
+
+        public bool TryGetBiome(string id, out Biome biome)
+        {
+            lock (_lock) return _biomes.TryGetValue(id ?? string.Empty, out biome!);
+        }
+
+        /// <summary>The biome with this id; unknown or empty ids give the neutral temperate biome.</summary>
+        public Biome GetBiome(string? id)
+        {
+            if (!string.IsNullOrEmpty(id) && TryGetBiome(id!, out var b)) return b;
+            return PixelCreatures.Core.Biomes.Temperate;
+        }
+
+        public IReadOnlyList<Biome> Biomes
+        {
+            get { lock (_lock) return _biomes.Values.OrderBy(b => b.Order).ThenBy(b => b.Id, StringComparer.Ordinal).ToList(); }
         }
 
         // ------------------------------------------------------------------ palette rules & materials

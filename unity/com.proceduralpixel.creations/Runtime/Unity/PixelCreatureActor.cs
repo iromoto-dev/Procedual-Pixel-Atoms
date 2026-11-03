@@ -1,14 +1,18 @@
 // Procedural Pixel Creations for Unity - a living creation on a SpriteRenderer.
 //
-// Add the component to a GameObject (a SpriteRenderer is added automatically), pick a family and a seed
-// or assign a preset, and press Play. The actor builds its model (on a worker thread where available),
-// simulates the motor with a fixed 60 Hz step that does not depend on the frame rate, rasterizes the
-// pose at the animation frame rate into a point-filtered texture and moves its transform over the
-// ground. In edit mode it shows the creation in its rest pose.
+// Add the component to a GameObject (a SpriteRenderer is added automatically), pick a family, a seed and
+// optionally a biome, or assign a preset, and press Play. The actor builds its model (on a worker thread
+// where available), simulates the motor with a fixed 60 Hz step that does not depend on the frame rate,
+// rasterizes the pose at the animation frame rate into a point-filtered texture and moves its transform
+// over the ground. In edit mode it shows the creation in its rest pose.
 //
 // Units: the core works in ground pixels. 'pixelsPerUnit' converts them to Unity units; the sprite is
 // rendered at 'pixelDensity' output pixels per ground pixel and drawn at pixelsPerUnit * density, so the
 // world size never depends on the density (2 = HD).
+//
+// Biomes: the biome adapts newly sampled creations (desert cacti, snow coats ...) and dresses the sprite
+// with its overlay (snow caps, sand, moss, mud, wet glints, colour grade). Presets keep their genes; only
+// the overlay applies to them.
 
 #nullable enable
 
@@ -19,6 +23,7 @@ using PixelCreatures.Core;
 using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Genetics;
 using PixelCreatures.Core.Motion;
+using PixelCreatures.Core.Palettes;
 using PixelCreatures.Core.Rendering;
 using UnityEngine;
 using UnityEngine.Events;
@@ -33,6 +38,9 @@ namespace PixelCreatures.Unity
     {
         [Serializable] public sealed class StringEvent : UnityEvent<string> { }
 
+        /// <summary>Largest sprite edge in pixels (the rasterizer's frame limit).</summary>
+        public const int MaxSpriteSize = 1024;
+
         [Header("Creation")]
         [Tooltip("Optional ppc.creature preset (JSON). When set it is used instead of family and seed.")]
         [SerializeField] private TextAsset? preset;
@@ -40,10 +48,14 @@ namespace PixelCreatures.Unity
         [SerializeField] private string familyId = "quadruped";
         [Tooltip("Seed text: a number or any text.")]
         [SerializeField] private string seed = "1";
+        [Tooltip("Biome id (temperate, desert, snow, jungle, swamp, volcanic): adapts sampled creations and dresses the sprite.")]
+        [SerializeField] private string biome = Biomes.TemperateId;
+        [Tooltip("Strength of the biome look (snow, sand, moss, mud, grade). 0 = off.")]
+        [SerializeField, Range(0f, 2f)] private float biomeIntensity = 1f;
 
         [Header("Pixels")]
         [Tooltip("Output pixels per ground pixel. 2 = HD with high density anatomy, 1 = classic. 0 = PixelCreatureRuntime.DefaultDensity.")]
-        [SerializeField, Min(0f)] private float pixelDensity;
+        [SerializeField, Range(0f, 4f)] private float pixelDensity;
         [Tooltip("Ground pixels per Unity unit. 0 = PixelCreatureRuntime.DefaultPixelsPerUnit.")]
         [SerializeField, Min(0f)] private float pixelsPerUnit;
         [Tooltip("Rendered poses per second (pixel-art animation rate). 0 = every frame.")]
@@ -79,16 +91,25 @@ namespace PixelCreatures.Unity
         public CreatureModel? Model { get; private set; }
         public CreatureMotor? Motor { get; private set; }
         public CreatureGenome? Genome => Model?.Genome;
-        /// <summary>Ground position in ground pixels (x east, y south).</summary>
-        public Vector2 GroundPosition { get; set; }
+
+        /// <summary>
+        /// Ground position (x east, y south, in ground pixels). Setting it places the creation there instantly
+        /// (like Teleport); use MoveVelocity to walk.
+        /// </summary>
+        public Vector2 GroundPosition
+        {
+            get => _ground;
+            set => Teleport(value);
+        }
         /// <summary>Desired ground velocity in ground pixels per second (x east, y south).</summary>
         public Vector2 MoveVelocity { get; set; }
-        /// <summary>Optional collision callback (from, to ground positions): false blocks the step.</summary>
+        /// <summary>Optional veto for every simulation step (from, to). A blocked step keeps the creation in place.</summary>
         public Func<Vector2, Vector2, bool>? CanMove { get; set; }
-        /// <summary>Optional terrain height (ground x, ground y) for foot placement.</summary>
+        /// <summary>Optional terrain height (x, y in ground pixels) for planted feet.</summary>
         public Func<double, double, double>? GroundHeightAt { get; set; }
-        /// <summary>Water surface height for swimmers (NaN = none): parts below are tinted.</summary>
         public double WaterLevel { get; set; } = double.NaN;
+        /// <summary>Overlay used instead of the biome's (code driven looks). Null = the biome's overlay.</summary>
+        public BiomeOverlay? OverlayOverride { get => _overlayOverride; set { _overlayOverride = value; RequestRender(); } }
         public Texture2D? Texture => _texture;
         public Sprite? Sprite => _sprite;
         public RenderStats LastStats { get; private set; }
@@ -100,6 +121,9 @@ namespace PixelCreatures.Unity
         public string FamilyId { get => familyId; set => familyId = value ?? string.Empty; }
         public string Seed { get => seed; set => seed = value ?? string.Empty; }
         public TextAsset? Preset { get => preset; set => preset = value; }
+        /// <summary>Biome id. Changing it affects the next build (sampling) and the look immediately.</summary>
+        public string Biome { get => biome; set { biome = string.IsNullOrEmpty(value) ? Biomes.TemperateId : value; RequestRender(); } }
+        public float BiomeIntensity { get => biomeIntensity; set { biomeIntensity = Mathf.Clamp(value, 0f, 2f); RequestRender(); } }
         public int AnimationFps { get => animationFps; set => animationFps = Mathf.Clamp(value, 0, 60); }
         public bool Paused { get => paused; set => paused = value; }
         public float TimeScale { get => timeScale; set => timeScale = Mathf.Max(0f, value); }
@@ -112,7 +136,7 @@ namespace PixelCreatures.Unity
         public float PixelDensity
         {
             get => pixelDensity;
-            set { pixelDensity = Mathf.Max(0f, value); if (Model != null) { _canvas = Model.Anatomy.Canvas.Scaled(EffectiveDensity); RequestRender(); } }
+            set { pixelDensity = Mathf.Clamp(value, 0f, 4f); UpdateCanvas(); }
         }
 
         public float PixelsPerUnit
@@ -121,8 +145,31 @@ namespace PixelCreatures.Unity
             set { pixelsPerUnit = Mathf.Max(0f, value); _spriteDirty = true; RequestRender(); }
         }
 
-        public double EffectiveDensity => Math.Max(1.0, pixelDensity > 0 ? pixelDensity : PixelCreatureRuntime.DefaultDensity);
+        /// <summary>Requested density (at least 1).</summary>
+        public double RequestedDensity => Math.Max(1.0, pixelDensity > 0 ? pixelDensity : PixelCreatureRuntime.DefaultDensity);
+
+        /// <summary>
+        /// Density actually rendered: the requested density, reduced for very large creations so the sprite
+        /// stays within MaxSpriteSize (with room for poses that reach beyond the rest canvas).
+        /// </summary>
+        public double EffectiveDensity
+        {
+            get
+            {
+                double d = RequestedDensity;
+                var m = Model;
+                if (m == null) return d;
+                int edge = Math.Max(m.Anatomy.Canvas.Width, m.Anatomy.Canvas.Height);
+                double limit = MaxSpriteSize * 0.85 / Math.Max(1, edge);
+                return Math.Max(1.0, Math.Min(d, limit));
+            }
+        }
+
         public float EffectivePixelsPerUnit => pixelsPerUnit > 0 ? pixelsPerUnit : Mathf.Max(1f, PixelCreatureRuntime.DefaultPixelsPerUnit);
+
+        /// <summary>The overlay the sprite is rendered with (the biome look for this creation, or the override).</summary>
+        public BiomeOverlay EffectiveOverlay =>
+            _overlayOverride ?? PixelCreatureRuntime.GetBiome(biome).OverlayFor(Model, biomeIntensity);
 
         // ------------------------------------------------------------------ internals
 
@@ -136,42 +183,79 @@ namespace PixelCreatures.Unity
         private byte[] _flipped = Array.Empty<byte>();
         private readonly byte[] _lut = new byte[256 * 4];
         private CreaturePose? _renderPose;
+        private CreaturePalette? _renderPalette;
         private ViewSpec _view;
+        private double _renderFlash;
         private readonly FixedClock _clock = new FixedClock();
         private double _sinceRender = 1e9;
-        private bool _dirty = true, _phased, _rastered;
+        private bool _dirty = true, _phased, _rastered, _rasterOk;
         private int _pendingSteps;
         private int _growL, _growR, _growT, _growB;
         private MotionStateKind _lastState = MotionStateKind.Idle;
         private double? _facingRequest;
         private bool _restRequest;
+        private Vector2 _ground;
+        private bool _groundSet;
+        private BiomeOverlay? _overlayOverride;
         private Task<CreatureModel>? _buildTask;
         private CancellationTokenSource? _buildCancel;
-        private int _buildTicket;
+        private CreatureGenome? _requestedGenome;
+        private CreatureGenome? _pendingGenome;
+        /// <summary>
+        /// CreationKey() of the inspector settings the shown (or building) creation corresponds to. Inspector
+        /// changes rebuild only when the key changes; creations set from code are never replaced by a
+        /// view-only change (density, shadow, biome look ...).
+        /// </summary>
+        private string _appliedKey = string.Empty;
+        private string _rasterError = string.Empty;
 #if UNITY_EDITOR
         private bool _settingsChanged;
 #endif
+
+        /// <summary>Play mode for this object (false in edit mode and in prefab mode, which also run [ExecuteAlways]).</summary>
+        private bool Live => Application.IsPlaying(gameObject);
 
         // ------------------------------------------------------------------ lifecycle
 
         private void OnEnable()
         {
             _spriteRenderer = GetComponent<SpriteRenderer>();
-            if (Model == null) BuildFromSettings(async: Application.isPlaying && buildAsync);
-            else RequestRender();
+            if (EditorBuildInProgress()) return;
+#if UNITY_EDITOR
+            _settingsChanged = false;
+#endif
+            if (_buildTask != null) return; // requested while disabled: Update applies it
+            if (_pendingGenome != null)
+            {
+                // a build was cancelled when the actor was disabled: start it again (models are cached)
+                var g = _pendingGenome;
+                _pendingGenome = null;
+                SetGenome(g, async: Live && buildAsync);
+            }
+            else if (Model == null || CreationKey() != _appliedKey) BuildFromSettings(async: Live && buildAsync);
+            else
+            {
+                UpdateCanvas();
+                if (!Live) RenderImmediate();
+            }
         }
 
         private void Start()
         {
-            if (!Application.isPlaying) return;
-            GroundPosition = PixelCreatureRuntime.WorldToGround(transform.position, EffectivePixelsPerUnit);
-            if (Motor != null) Motor.Teleport(new Vec3(GroundPosition.x, 0, GroundPosition.y), Motor.Yaw);
+            if (!Live) return;
+            if (!_groundSet) _ground = PixelCreatureRuntime.WorldToGround(transform.position, EffectivePixelsPerUnit);
+            if (Motor != null) Motor.Teleport(new Vec3(_ground.x, 0, _ground.y), Motor.Yaw);
         }
 
         private void OnDisable()
         {
             PixelCreatureRenderQueue.Remove(this);
+            // a build in flight (or finished but not applied yet) is started again when the actor is enabled
+            if (_buildTask != null && _requestedGenome != null) _pendingGenome = _requestedGenome;
             CancelBuild();
+            // edit mode (script reloads, entering play mode, disabling): free the preview texture and sprite;
+            // OnDestroy is not called on a domain reload, so this is the only place they can be released
+            if (!Live) ReleaseGraphics();
         }
 
         private void OnDestroy()
@@ -194,19 +278,38 @@ namespace PixelCreatures.Unity
 #if UNITY_EDITOR
         private void ApplyValidatedSettings()
         {
+            // disabled actors pick up changed settings in OnEnable
             if (this == null || !isActiveAndEnabled || !_settingsChanged) return;
             _settingsChanged = false;
-            if (Application.isPlaying) RequestRender();
-            else BuildFromSettings(async: false);
+            if ((Model != null || _buildTask != null) && _appliedKey == CreationKey())
+            {
+                // only view settings changed (density, shadow, biome look ...)
+                UpdateCanvas();
+                if (!Live) RenderImmediate();
+            }
+            else BuildFromSettings(async: Live && buildAsync);
         }
 #endif
 
+        private static bool EditorBuildInProgress()
+        {
+#if UNITY_EDITOR
+            return UnityEditor.BuildPipeline.isBuildingPlayer;
+#else
+            return false;
+#endif
+        }
+
         // ------------------------------------------------------------------ genome & model
 
-        /// <summary>Rebuilds from the serialized preset or family + seed.</summary>
+        private string CreationKey() =>
+            preset != null ? "preset:" + preset.GetInstanceID() + ":" + preset.text.Length + ":" + preset.text.GetHashCode() : familyId + "|" + seed + "|" + biome;
+
+        /// <summary>Rebuilds from the serialized preset or family + seed (+ biome).</summary>
         public void BuildFromSettings(bool async)
         {
             CreatureGenome genome;
+            string key = CreationKey();
             try
             {
                 if (preset != null)
@@ -218,7 +321,7 @@ namespace PixelCreatures.Unity
                 else
                 {
                     if (!PixelCreatureRuntime.Registry.TryGetFamily(familyId, out _)) { Fail($"Unknown family '{familyId}'."); return; }
-                    genome = PixelCreatureRuntime.Sample(familyId, PixelCreatureRuntime.SeedFromText(seed));
+                    genome = PixelCreatureRuntime.Sample(familyId, PixelCreatureRuntime.SeedFromText(seed), biome);
                 }
             }
             catch (Exception e)
@@ -227,13 +330,17 @@ namespace PixelCreatures.Unity
                 return;
             }
             SetGenome(genome, async);
+            _appliedKey = key;
         }
 
         /// <summary>Replaces the creation. Async builds keep showing the old one until the new model is ready.</summary>
         public void SetGenome(CreatureGenome genome, bool async = true)
         {
             CancelBuild();
-            if (!async || !PixelCreatureRuntime.ThreadsSupported || !Application.isPlaying)
+            _requestedGenome = genome;
+            _pendingGenome = null;
+            _appliedKey = CreationKey();
+            if (!async || !PixelCreatureRuntime.ThreadsSupported || !Live)
             {
                 try { ApplyModel(PixelCreatureRuntime.Build(genome)); }
                 catch (Exception e) { Fail(e.Message); }
@@ -241,7 +348,6 @@ namespace PixelCreatures.Unity
             }
             _buildCancel = new CancellationTokenSource();
             var token = _buildCancel.Token;
-            _buildTicket++;
             _buildTask = Task.Run(() => PixelCreatureRuntime.Factory.Build(genome, token), token);
         }
 
@@ -254,7 +360,7 @@ namespace PixelCreatures.Unity
             return true;
         }
 
-        /// <summary>Samples a new creation of the current family from a seed.</summary>
+        /// <summary>Samples a new creation of the current family (and biome) from a seed.</summary>
         public void Reroll(string newSeed, bool async = true)
         {
             preset = null;
@@ -266,23 +372,40 @@ namespace PixelCreatures.Unity
         public void ApplyModel(CreatureModel model)
         {
             var old = Motor;
+            // a snapshot taken earlier in this frame belongs to the previous model
+            PixelCreatureRenderQueue.Remove(this);
+            _renderPalette = null;
             Model = model;
             familyId = model.Genome.FamilyId;
+            _appliedKey = CreationKey();
+            _spriteDirty = true;
             Motor = new CreatureMotor(model, PixelCreatureRuntime.Registry, new MotorOptions { Facing = facing, InternalDrive = true });
             double yaw = old?.Yaw ?? PixelCamera.DirectionYaw(startDirection);
-            Motor.Teleport(new Vec3(GroundPosition.x, 0, GroundPosition.y), yaw);
+            Motor.Teleport(new Vec3(_ground.x, 0, _ground.y), yaw);
             // only an explicit FaceYaw/FaceDirection request pins the facing; otherwise the creature keeps
             // the direction it last moved in
             Motor.FacingOverride = _facingRequest;
             if ((old != null && old.Resting) || _restRequest) Motor.SnapRest(true);
             Motor.Resting = _restRequest;
             _renderPose = new CreaturePose(model.Anatomy.Skeleton);
-            _canvas = model.Anatomy.Canvas.Scaled(EffectiveDensity);
+            UpdateCanvas();
             _clock.Reset();
             LastError = string.Empty;
-            RequestRender();
-            if (!Application.isPlaying) RenderImmediate();
+            if (!Live) RenderImmediate();
             onModelChanged.Invoke();
+        }
+
+        private void UpdateCanvas()
+        {
+            var m = Model;
+            if (m == null) return;
+            var c = m.Anatomy.Canvas.Scaled(EffectiveDensity);
+            if (_canvas == null || c.Width != _canvas.Width || c.Height != _canvas.Height || c.OriginX != _canvas.OriginX || c.OriginY != _canvas.OriginY)
+            {
+                _canvas = c;
+                _spriteDirty = true;
+            }
+            RequestRender();
         }
 
         private void CancelBuild()
@@ -313,7 +436,13 @@ namespace PixelCreatures.Unity
             ApplyModel(task.Result);
         }
 
-        private void Fail(string message)
+        /// <summary>Rendering errors repeat every frame: report each one once.</summary>
+        internal void ReportRenderError(string message)
+        {
+            if (message != LastError) Fail(message);
+        }
+
+        internal void Fail(string message)
         {
             LastError = message;
             Debug.LogWarning($"[PixelCreatureActor] {name}: {message}", this);
@@ -349,7 +478,8 @@ namespace PixelCreatures.Unity
         /// <summary>Moves instantly (resets feet and spring chains).</summary>
         public void Teleport(Vector2 groundPosition)
         {
-            GroundPosition = groundPosition;
+            _ground = groundPosition;
+            _groundSet = true;
             Motor?.Teleport(new Vec3(groundPosition.x, 0, groundPosition.y), Motor.Yaw);
             SyncTransform();
             _dirty = true;
@@ -370,19 +500,21 @@ namespace PixelCreatures.Unity
         {
             PollBuild();
             if (Motor == null) return;
-            if (!Application.isPlaying)
+            if (!Live)
             {
                 if (_dirty) RenderImmediate();
+                // prefab merges and undo can reset the renderer's sprite: keep showing the preview
+                else if (_sprite != null && _spriteRenderer != null && _spriteRenderer.sprite != _sprite) _spriteRenderer.sprite = _sprite;
                 return;
             }
             Motor.Options.Facing = facing;
+            Motor.Context.GroundHeightAt = GroundHeightAt;
             if (_facingRequest.HasValue && MoveVelocity.sqrMagnitude > 1e-4f)
             {
                 // steering takes over from a FaceYaw request
                 _facingRequest = null;
                 Motor.FacingOverride = null;
             }
-            Motor.Context.GroundHeightAt = GroundHeightAt;
             int steps = paused ? 0 : _clock.Advance(Time.deltaTime * Math.Max(0f, timeScale));
             steps += _pendingSteps;
             _pendingSteps = 0;
@@ -392,13 +524,17 @@ namespace PixelCreatures.Unity
                 Motor.DesiredVelocity = new Vec3(MoveVelocity.x, 0, MoveVelocity.y);
                 Motor.Step(_clock.StepSize);
                 if (CanMove != null && !CanMove(new Vector2((float)before.X, (float)before.Z), new Vector2((float)Motor.Position.X, (float)Motor.Position.Z)))
-                    Motor.Teleport(before, Motor.Yaw);
+                {
+                    // stay in place without resetting the gait (Teleport would snap the legs every step)
+                    Motor.Context.Position = before;
+                    Motor.Context.Velocity = Vec3.Zero;
+                }
                 _sinceRender += _clock.StepSize;
             }
-            GroundPosition = new Vector2((float)Motor.Position.X, (float)Motor.Position.Z);
+            _ground = new Vector2((float)Motor.Position.X, (float)Motor.Position.Z);
             SyncTransform();
             if (sortByGroundDepth && _spriteRenderer != null)
-                _spriteRenderer.sortingOrder = Mathf.Clamp(Mathf.RoundToInt(GroundPosition.y) + sortingOrderOffset, short.MinValue, short.MaxValue);
+                _spriteRenderer.sortingOrder = Mathf.Clamp(Mathf.RoundToInt(_ground.y) + sortingOrderOffset, short.MinValue, short.MaxValue);
 
             var state = Motor.State;
             if (state != _lastState)
@@ -427,26 +563,32 @@ namespace PixelCreatures.Unity
 
         private void SyncTransform()
         {
-            if (!moveTransform || !Application.isPlaying) return;
-            var p = PixelCreatureRuntime.GroundToWorld(GroundPosition, EffectivePixelsPerUnit);
+            if (!moveTransform || !Live) return;
+            var p = PixelCreatureRuntime.GroundToWorld(_ground, EffectivePixelsPerUnit);
             var t = transform;
             t.position = new Vector3(p.x, p.y, t.position.z);
         }
 
+        /// <summary>Main thread: copies everything the worker thread needs (pose, view, palette).</summary>
         private void SnapshotView()
         {
-            if (Motor == null || _renderPose == null) return;
+            if (Motor == null || _renderPose == null || Model == null) return;
             _renderPose.CopyFrom(Motor.Pose);
             _view = ViewSpec.Default(Motor.Yaw, EffectiveDensity);
             _view.DrawShadow = drawShadow;
             _view.Quality = quality;
             _view.WaterLevel = WaterLevel;
+            _view.Overlay = EffectiveOverlay;
+            _renderPalette = Model.PaletteFor(_view.Overlay);
+            _renderFlash = Motor.HitFlash;
         }
 
         /// <summary>Simulates nothing, renders the current pose right now on the main thread (edit mode, tools, tests).</summary>
         public void RenderImmediate()
         {
-            if (Motor == null) return;
+            if (Motor == null || EditorBuildInProgress()) return;
+            // edit mode: a disabled actor would create preview objects nothing releases (no OnDisable follows)
+            if (!Live && !isActiveAndEnabled) { _dirty = true; return; }
             _dirty = false;
             SnapshotView();
             if (!PrepareRaster()) return;
@@ -459,8 +601,13 @@ namespace PixelCreatures.Unity
         /// <summary>Main thread: makes sure the frame buffers match the canvas.</summary>
         internal bool PrepareRaster()
         {
-            if (Model == null || _renderPose == null || _canvas == null) return false;
+            if (Model == null || _renderPose == null || _canvas == null || _renderPalette == null) return false;
             var c = _canvas;
+            if (c.Width > MaxSpriteSize || c.Height > MaxSpriteSize)
+            {
+                ReportRenderError($"The sprite would be {c.Width}x{c.Height} px; the limit is {MaxSpriteSize} px.");
+                return false;
+            }
             if (_frame == null || _frame.Width != c.Width || _frame.Height != c.Height)
             {
                 _frame = new PixelFrame(c.Width, c.Height);
@@ -469,6 +616,7 @@ namespace PixelCreatures.Unity
             }
             _frame.OriginX = c.OriginX;
             _frame.OriginY = c.OriginY;
+            _rasterOk = false;
             return true;
         }
 
@@ -478,10 +626,11 @@ namespace PixelCreatures.Unity
             var model = Model;
             var frame = _frame;
             var pose = _renderPose;
-            if (model == null || frame == null || pose == null) return;
+            var palette = _renderPalette;
+            if (model == null || frame == null || pose == null || palette == null) return;
             try
             {
-                var stats = renderer.Render(model.Anatomy, model.Palette, model.Surface, pose, _view, frame);
+                var stats = renderer.Render(model.Anatomy, palette, model.Surface, pose, _view, frame);
                 LastStats = stats;
                 if (stats.Overflow)
                 {
@@ -490,32 +639,48 @@ namespace PixelCreatures.Unity
                     _growT = Math.Max(_growT, stats.OverflowTop);
                     _growB = Math.Max(_growB, stats.OverflowBottom);
                 }
-                model.Palette.BuildLut(_lut, Motor?.HitFlash ?? 0);
-                frame.ToRgba(_lut, _rgba, model.Palette.WaterTint);
+                palette.BuildLut(_lut, _renderFlash);
+                frame.ToRgba(_lut, _rgba, palette.WaterTint);
                 int row = frame.Width * 4;
                 for (int y = 0; y < frame.Height; y++)
                     Buffer.BlockCopy(_rgba, y * row, _flipped, (frame.Height - 1 - y) * row, row);
-                _rastered = true;
+                _rasterOk = true;
             }
             catch (Exception e)
             {
-                LastError = e.Message;
+                // reported on the main thread in Upload (Unity's logging is not called from workers)
+                _rasterError = e.Message;
             }
         }
 
         /// <summary>Main thread: uploads the texture, grows the canvas if a pose did not fit.</summary>
         internal void Upload()
         {
-            if (_frame == null || _canvas == null) return;
+            if (!string.IsNullOrEmpty(_rasterError))
+            {
+                string e = _rasterError;
+                _rasterError = string.Empty;
+                ReportRenderError(e);
+                return;
+            }
+            if (_frame == null || _canvas == null || !_rasterOk) return;
             if (_growL + _growR + _growT + _growB > 0)
             {
                 var c = _canvas;
                 int l = _growL + 2, r = _growR + 2, t = _growT + 2, b = _growB + 2;
                 _growL = _growR = _growT = _growB = 0;
-                _canvas = new CanvasSpec(Math.Min(2048, c.Width + l + r), Math.Min(2048, c.Height + t + b), c.OriginX + l, c.OriginY + t);
-                RequestRender();
-                if (!Application.isPlaying) RenderImmediate();
-                return;
+                int w2 = Math.Min(MaxSpriteSize, c.Width + l + r), h2 = Math.Min(MaxSpriteSize, c.Height + t + b);
+                if (w2 != c.Width || h2 != c.Height)
+                {
+                    // grown canvas (never beyond the frame limit); the origin moves with the added left/top margin
+                    int ox = Math.Min(w2 - 1, c.OriginX + Math.Min(l, w2 - c.Width));
+                    int oy = Math.Min(h2 - 1, c.OriginY + Math.Min(t, h2 - c.Height));
+                    _canvas = new CanvasSpec(w2, h2, ox, oy);
+                    _spriteDirty = true;
+                    RequestRender();
+                    if (!Live) RenderImmediate();
+                    return;
+                }
             }
             int w = _frame.Width, h = _frame.Height;
             if (_texture == null || _texture.width != w || _texture.height != h)
@@ -543,16 +708,26 @@ namespace PixelCreatures.Unity
             }
             if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
             if (_spriteRenderer != null && _spriteRenderer.sprite != _sprite) _spriteRenderer.sprite = _sprite;
+            _rastered = true;
             RenderCount++;
         }
 
+        /// <summary>
+        /// Removes the edit mode preview sprite from the SpriteRenderer and frees it. Called before player builds
+        /// process a scene (the preview is never saved and must not reach a build).
+        /// </summary>
+        public void ReleasePreview() => ReleaseGraphics();
+
         private void ReleaseGraphics()
         {
-            if (_spriteRenderer != null && _spriteRenderer.sprite == _sprite) _spriteRenderer.sprite = null;
+            if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
+            if (_spriteRenderer != null && _sprite != null && _spriteRenderer.sprite == _sprite) _spriteRenderer.sprite = null;
             ReleaseObject(_sprite);
             ReleaseObject(_texture);
             _sprite = null;
             _texture = null;
+            _spriteDirty = true;
+            _rastered = false;
         }
 
         private static void ReleaseObject(UnityEngine.Object? o)

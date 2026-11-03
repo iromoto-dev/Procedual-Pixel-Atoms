@@ -81,6 +81,18 @@ namespace PixelCreatures.Workshop
         /// <summary>Raised after the genome changed (argument: human readable reason).</summary>
         public event Action<string>? GenomeChanged;
         public event Action? LocksChanged;
+        /// <summary>Raised after the biome changed.</summary>
+        public event Action? BiomeChanged;
+
+        /// <summary>Biome of new creatures and rolls, and the look of the previews (temperate = none).</summary>
+        public Biome Biome { get; private set; } = Biomes.Temperate;
+
+        public void SetBiome(Biome biome)
+        {
+            if (biome == Biome) return;
+            Biome = biome;
+            BiomeChanged?.Invoke();
+        }
 
         public WorkshopState(CreatureRegistry registry, CreatureGenome initial)
         {
@@ -113,18 +125,20 @@ namespace PixelCreatures.Workshop
 
         public void NewCreature(string familyId, ulong seed)
         {
-            var g = GenomeFactory.Sample(Registry.GetFamily(familyId), seed);
+            var g = GenomeFactory.Sample(Registry.GetFamily(familyId), seed, Biome);
             // locks only make sense within one family
             if (familyId != Genome.FamilyId) Locks.Clear();
-            else if (!Locks.IsEmpty) g = GenomeFactory.RegenerateUnlocked(Family, Genome, Locks, seed);
-            Set(g, $"New creature (seed {seed})");
+            else if (!Locks.IsEmpty) g = GenomeFactory.RegenerateUnlocked(Family, Genome, Locks, seed, Biome);
+            Set(g, $"New creature (seed {seed}{BiomeSuffix})");
         }
 
         public void RegenerateUnlocked(ulong seed)
         {
-            var g = GenomeFactory.RegenerateUnlocked(Family, Genome, Locks, seed);
-            Set(g, $"Rerolled unlocked traits (seed {seed})");
+            var g = GenomeFactory.RegenerateUnlocked(Family, Genome, Locks, seed, Biome);
+            Set(g, $"Rerolled unlocked traits (seed {seed}{BiomeSuffix})");
         }
+
+        private string BiomeSuffix => Biome.IsNeutralSampling ? string.Empty : ", " + Biome.DisplayName.ToLowerInvariant();
 
         public bool Undo()
         {

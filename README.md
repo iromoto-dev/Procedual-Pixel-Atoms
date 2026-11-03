@@ -7,7 +7,8 @@
 A procedural pixel-art generator, animation framework and genetics workshop built with **Godot 4.5.2 .NET / C#**.
 It creates **creatures, mythical creatures, monsters, trees and flora, and props** — body shapes, limbs,
 faces, branches, objects, colors, markings, rigs and movement are all generated in code, rendered in
-**HD pixel density** with a dedicated high-density anatomy layer.
+**HD pixel density** with a dedicated high-density anatomy layer, in **six biomes** (temperate,
+desert, snow, jungle, swamp, volcanic) that adapt both the creations and their look.
 There are no premade creature sprites or AI-generated source images. After the initial setup,
 the application runs offline without an AI service.
 
@@ -40,7 +41,8 @@ The first setup needs an internet connection; subsequent starts reuse the downlo
 | **Workshop** | Edit individual genes, lock traits, reroll the rest, undo/redo, inspect rigs and foot contacts, and preview animation with a fixed camera. |
 | **Genetics** | Generate four animated offspring with adjustable mutation strength, or combine two compatible parents. |
 | **Overview** | Generate 1–100 creatures, filter by family or archetype, keep favorites during rerolls, and send any creature back to the editor. |
-| **Test area** | Explore five map sizes with terraced hills, slopes, cliffs, vegetation and ponds. Land creatures follow the terrain; aquatic creatures swim below the water surface. |
+| **Biomes** | Pick temperate, desert, snow, jungle, swamp or volcanic: new creatures, trees and props are sampled for the biome and drawn with its look (snow caps, sand, moss, mud, ash, wet glints). |
+| **Test area** | Explore five map sizes with terraced hills, slopes, cliffs, vegetation and ponds in any biome. Land creatures follow the terrain; aquatic creatures swim below the water surface. |
 | **Export** | Save versioned JSON presets, transparent PNGs, or HD sprite sheets with animation metadata and a playback preview. |
 | **Framework** | Use the engine-independent C# core or Godot `CreatureActor` in your own project. Plantfolk demonstrate how to add a family through the public extension API. |
 
@@ -84,6 +86,27 @@ bellies, reptile back scutes, chitin joints with bristles, fur and leaf silhouet
 
 ![Classic and HD rendering of the same genomes](.github/images/hd_comparison.png) Seeds and separate anatomy, color, pattern
 and motion streams make results reproducible for a given generator version.
+
+## Biomes
+
+A biome adapts creations on two layers:
+
+1. **Sampling.** Archetypes, coat colours, patterns, glow and genes are re-weighted: the desert grows
+   cacti and palms and brings sandworms, scorpions and sand-coloured coats with big ears and long legs;
+   snow brings snowy conifers, yetis, owls and white, bulky, small-eared animals; the jungle dense palms,
+   flowers, vivid patterned coats and overgrown ruins; the swamp willows, crocodiles, hydras and murky
+   mottled coats; volcanic wastes charred trees, glowing crystals, dragons and imps. The result is an
+   ordinary genome, so editing, breeding and presets work unchanged.
+2. **Look.** An overlay dresses any rendered creation: snow, sand, moss, algae or ash on upward-facing
+   surfaces (part-attached, so it stays on the body while it moves), mud, dust or soot near the ground,
+   wet glints and a colour grade. Eyes and glowing parts stay uncovered; swimmers carry no snow.
+
+![The same seeds in all six biomes](.github/images/biomes.png)
+
+Choose the biome in the workshop toolbar or in the test area (key **B**); the Godot `CreatureActor` and
+the Unity `PixelCreatureActor` have a `Biome` and a `BiomeIntensity` property. The temperate biome
+changes nothing: existing seeds, presets and renders stay bit-identical. Extensions can register biomes
+of their own ([architecture guide](docs/ARCHITECTURE.md#biomes)).
 
 ## Requirements
 
@@ -241,8 +264,9 @@ The [architecture guide](docs/ARCHITECTURE.md) explains generation, animation, r
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
 ```
 
-This builds and imports the project, runs the **17 core tests with 100 seeds per family**, then runs
-**28 Godot self-tests** headlessly. Golden values pin both the classic and the HD render of every family. Add `-Quick` for 10 seeds per family. Tests include deterministic
+This builds and imports the project, runs the **20 core tests with 100 seeds per family**, then runs
+**32 Godot self-tests** headlessly. Golden values pin both the classic and the HD render of every family
+and the biome variants and overlays. Add `-Quick` for 10 seeds per family. Tests include deterministic
 golden values, genetics, export round trips, terrain/water clearance, population changes and stable
 workshop preview framing. Reports go to the ignored `reports/` directory; failures return a nonzero exit code.
 
@@ -253,7 +277,7 @@ dotnet run -c Release --project tools/core_harness -- test reports all 100
 ```
 
 The harness also renders labelled contact sheets for visual review (`--density=2` for HD,
-`--by-archetype`, `--grid=N`, `--dir=0..7`, `--walk`, `--action=SECONDS`) and writes sample genomes:
+`--by-archetype`, `--grid=N`, `--dir=0..7`, `--walk`, `--action=SECONDS`, `--biome=snow`) and writes sample genomes:
 
 ```bash
 dotnet run -c Release --project tools/core_harness -- sheet reports/sheets flora 2 2 --by-archetype --density=2 --grid=6

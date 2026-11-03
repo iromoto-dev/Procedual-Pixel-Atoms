@@ -47,8 +47,8 @@ namespace PixelCreatures.Workshop
                         float depth = (float)Math.Clamp(-shore / 42, 0, 1);
                         map.WaterDepth[i] = depth;
                         double grain = Hash(map.Seed + 601, x / 2, y / 2);
-                        var shallow = Color.Color8(75, 151, 145);
-                        var deep = Color.Color8(21, 61, 89);
+                        var shallow = EnvironmentArt.ReliefWaterShallow;
+                        var deep = EnvironmentArt.ReliefWaterDeep;
                         Color c = shallow.Lerp(deep, depth * 0.9f);
                         c = c.Lightened((float)(grain * 0.055));
                         // Sand bars and quiet caustic lines remain visible through the water.
@@ -105,9 +105,10 @@ namespace PixelCreatures.Workshop
                             continue;
                         }
                         double grain = Hash(map.Seed + 710, x / 3, fy / 2);
-                        var rock = grain > 0.6 ? Color.Color8(116, 102, 76) : Color.Color8(86, 84, 67);
-                        if ((fy - top) % 5 == 0) rock = Color.Color8(67, 71, 59);
-                        if (fy == top + 1) rock = Color.Color8(146, 139, 92);
+                        var theme = EnvironmentArt.Theme;
+                        var rock = grain > 0.6 ? theme.Cliff1 : theme.Cliff0;
+                        if ((fy - top) % 5 == 0) rock = theme.CliffLine;
+                        if (fy == top + 1) rock = theme.CliffTop;
                         PutClip(projected, w, h, x, fy, rock);
                     }
                 }

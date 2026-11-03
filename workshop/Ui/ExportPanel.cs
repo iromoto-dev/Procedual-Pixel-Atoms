@@ -111,9 +111,10 @@ namespace PixelCreatures.Workshop
             int scale = new[] { 1, 2, 4, 8 }[Math.Max(0, _scale.Selected)];
             var f = actor.Frame;
             var lut = new byte[1024];
-            actor.Model.Palette.BuildLut(lut, 0);
+            var palette = actor.FramePalette ?? actor.Model.Palette;
+            palette.BuildLut(lut, 0);
             var rgba = new byte[f.Width * f.Height * 4];
-            f.ToRgba(lut, rgba, actor.Model.Palette.WaterTint);
+            f.ToRgba(lut, rgba, palette.WaterTint);
             var png = PngEncoder.Encode(PngEncoder.Upscale(rgba, f.Width, f.Height, scale), f.Width * scale, f.Height * scale,
                 ("Software", "Procedural Pixel Creatures " + CreatureFramework.FrameworkVersion), ("Creature", actor.Model.Genome.ContentId),
                 ("Origin", $"{f.OriginX * scale},{f.OriginY * scale}"));
@@ -140,6 +141,8 @@ namespace PixelCreatures.Workshop
                 Fps = new[] { 6, 10, 12, 15, 20, 30 }[Math.Max(0, _fps.Selected)],
                 Density = CreatureRuntime.DefaultDensity,
                 DrawShadow = _shadow.ButtonPressed,
+                Overlay = _main.PreviewActor.EffectiveOverlay,
+                Biome = _main.State.Biome.IsNeutralSampling ? string.Empty : _main.State.Biome.Id,
                 Directions = _dirs.Selected switch
                 {
                     1 => new List<int> { 0, 2, 4, 6 },

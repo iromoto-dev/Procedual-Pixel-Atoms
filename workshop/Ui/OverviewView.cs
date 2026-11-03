@@ -54,6 +54,8 @@ namespace PixelCreatures.Workshop
             public CreatureGenome? Parent;
             public MutationSettings Mutation = new MutationSettings { Strength = 0.35 };
             public GeneLocks? Locks;
+            /// <summary>Biome the random creatures are sampled in (null = temperate).</summary>
+            public Biome? Biome;
         }
 
         // ------------------------------------------------------------------ state
@@ -366,6 +368,23 @@ namespace PixelCreatures.Workshop
             return UiKit.Card(col);
         }
 
+        /// <summary>
+        /// The workshop biome changed: every creature gets the new look right away; random populations are
+        /// sampled again in the new biome (immediately when the overview is shown, otherwise when it opens).
+        /// </summary>
+        public void BiomeChanged()
+        {
+            string id = _main.State.Biome.Id;
+            foreach (var e in _entries)
+                if (e.Actor != null && IsInstanceValid(e.Actor)) e.Actor.Biome = id;
+            if (InspectorActor != null && IsInstanceValid(InspectorActor)) InspectorActor.Biome = id;
+            Grid?.RedrawCells();
+            _inspStage?.Ground.QueueRedraw();
+            if (!HasGenerated || Settings.Source != SourceKind.Random) return;
+            if (Visible) Generate();
+            else HasGenerated = false;
+        }
+
         /// <summary>Hidden views neither process nor render (called by the workshop when switching views).</summary>
         public void SetActive(bool on)
         {
@@ -470,6 +489,7 @@ namespace PixelCreatures.Workshop
             Settings.Archetype = Settings.Source == SourceKind.Random && fam != null && _archetype.Selected > 0 ? fam.Archetypes[_archetype.Selected - 1].Id : null;
             Settings.Count = (int)_count.Value;
             Settings.Locks = _respectLocks.ButtonPressed ? _main.State.Locks : null;
+            Settings.Biome = _main.State.Biome;
             if (Settings.Source == SourceKind.Offspring && Settings.Parent == null) Settings.Parent = _main.State.Genome;
             Start(Settings, keep);
         }
@@ -582,7 +602,7 @@ namespace PixelCreatures.Workshop
                 for (ulong seed = s.Seed; list.Count < count && seed < s.Seed + 50000; seed++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var g = GenomeFactory.Sample(f, seed);
+                    var g = GenomeFactory.Sample(f, seed, s.Biome);
                     if (g.Schema.Contains("form") && g.GetChoice("form") == s.Archetype) list.Add((g, seed));
                 }
                 return list;
@@ -593,7 +613,7 @@ namespace PixelCreatures.Workshop
                 token.ThrowIfCancellationRequested();
                 var f = families[i % families.Count];
                 ulong seed = s.Seed + (ulong)i;
-                list.Add((GenomeFactory.Sample(f, seed), seed));
+                list.Add((GenomeFactory.Sample(f, seed, s.Biome), seed));
             }
             return list;
         }
@@ -809,7 +829,7 @@ namespace PixelCreatures.Workshop
             {
                 var fam = CreatureRuntime.Registry.GetFamily(e.Family);
                 seed = Settings.Seed + 100_000UL + _rerollCounter;
-                g = GenomeFactory.Sample(fam, seed);
+                g = GenomeFactory.Sample(fam, seed, Settings.Biome);
             }
             var fresh = MakeEntry(g, seed, new CreatureRenderer());
             e.Genome = fresh.Genome; e.Model = fresh.Model; e.Archetype = fresh.Archetype; e.ArchetypeLabel = fresh.ArchetypeLabel;

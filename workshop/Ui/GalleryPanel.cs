@@ -81,12 +81,13 @@ namespace PixelCreatures.Workshop
             AddThemeConstantOverride("separation", 4);
             var controls = new HBoxContainer();
             controls.AddThemeConstantOverride("separation", 6);
-            _mode = new OptionButton { FocusMode = FocusModeEnum.None };
+            // fixed widths and clipped texts: the tab must not widen the whole workshop layout
+            _mode = new OptionButton { FocusMode = FocusModeEnum.None, FitToLongestItem = false, ClipText = true, CustomMinimumSize = new Vector2(210, 0) };
             _mode.AddItem("Sample genomes (curated)");
             _mode.AddItem("Fixed random sample (uncurated)");
             _mode.AddItem("User presets (user://presets)");
             _mode.ItemSelected += _ => Rebuild();
-            _family = new OptionButton { FocusMode = FocusModeEnum.None };
+            _family = new OptionButton { FocusMode = FocusModeEnum.None, FitToLongestItem = false, ClipText = true, CustomMinimumSize = new Vector2(220, 0) };
             _family.AddItem("All families");
             foreach (var f in CreatureRuntime.Registry.Families) _family.AddItem(CreatureRuntime.FamilyLabel(f));
             _family.ItemSelected += _ => Rebuild();
@@ -94,6 +95,8 @@ namespace PixelCreatures.Workshop
             controls.AddChild(_family);
             controls.AddChild(UiKit.Button("Refresh", Rebuild, "Reload the list"));
             _hint = UiKit.Label("Click a creature to load it into the editor.", 12, UiKit.TextDim);
+            _hint.ClipText = true;
+            _hint.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             controls.AddChild(_hint);
             AddChild(controls);
             var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
@@ -121,7 +124,7 @@ namespace PixelCreatures.Workshop
                         if (famFilter != null && f.Id != famFilter) continue;
                         foreach (var s in SampleLibrary.UncuratedSeeds)
                         {
-                            var g = GenomeFactory.Sample(f, s);
+                            var g = GenomeFactory.Sample(f, s, _main.State.Biome);
                             entries.Add((g, $"{g.Name} · Seed {s}"));
                         }
                     }
@@ -167,6 +170,14 @@ namespace PixelCreatures.Workshop
             }
         }
 
+        /// <summary>The workshop biome changed: thumbnails show the new look (and new samples in the seed mode).</summary>
+        public void BiomeChanged()
+        {
+            _thumbs.Clear();
+            _dirty = true;
+            if (IsVisibleInTree()) Rebuild();
+        }
+
         public Texture2D Thumbnail(CreatureGenome g)
         {
             if (_thumbs.TryGetValue(g.ContentHash, out var t)) return t;
@@ -174,13 +185,16 @@ namespace PixelCreatures.Workshop
             var pose = new CreaturePose(model.Anatomy.Skeleton);
             var c = model.Anatomy.Canvas;
             var frame = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
-            _renderer.Render(model.Anatomy, model.Palette, model.Surface, pose, ViewSpec.Default(PixelCamera.DirectionYaw(7)), frame);
+            var view = ViewSpec.Default(PixelCamera.DirectionYaw(7));
+            view.Overlay = _main.State.Biome.OverlayFor(model);
+            var palette = model.PaletteFor(view.Overlay);
+            _renderer.Render(model.Anatomy, palette, model.Surface, pose, view, frame);
             frame.ContentBounds(out int x0, out int y0, out int x1, out int y1);
             x0 = Math.Max(0, x0 - 2); y0 = Math.Max(0, y0 - 2); x1 = Math.Min(c.Width, x1 + 2); y1 = Math.Min(c.Height, y1 + 2);
             var lut = new byte[1024];
-            model.Palette.BuildLut(lut, 0);
+            palette.BuildLut(lut, 0);
             var rgba = new byte[c.Width * c.Height * 4];
-            frame.ToRgba(lut, rgba, model.Palette.WaterTint);
+            frame.ToRgba(lut, rgba, palette.WaterTint);
             int w = Math.Max(1, x1 - x0), h = Math.Max(1, y1 - y0);
             var crop = new byte[w * h * 4];
             for (int y = 0; y < h; y++) Array.Copy(rgba, ((y0 + y) * c.Width + x0) * 4, crop, y * w * 4, w * 4);

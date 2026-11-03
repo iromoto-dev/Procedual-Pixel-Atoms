@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using PixelCreatures.Core;
 using PixelCreatures.Core.Genetics;
+using PixelCreatures.Core.Palettes;
 using PixelCreatures.Core.Rendering;
 using PixelCreatures.Core.Serialization;
 using UnityEngine;
@@ -50,18 +51,40 @@ namespace PixelCreatures.Unity
         public static bool ThreadsSupported =>
             Application.platform != RuntimePlatform.WebGLPlayer && SystemInfo.processorCount > 1;
 
+        // "Enter Play Mode" without a domain reload keeps statics: start every session with the defaults
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            DefaultDensity = (float)CreatureFramework.HdDensity;
+            DefaultPixelsPerUnit = 32f;
+        }
+
         public static CreatureGenome Sample(string familyId, ulong seed) => GenomeFactory.Sample(Registry.GetFamily(familyId), seed);
 
+        /// <summary>A genome sampled in a biome (null, empty or "temperate" = the family's own distribution).</summary>
+        public static CreatureGenome Sample(string familyId, ulong seed, string? biomeId) =>
+            GenomeFactory.Sample(Registry.GetFamily(familyId), seed, GetBiome(biomeId));
+
+        /// <summary>Registered biomes (temperate, desert, snow, jungle, swamp, volcanic and extension biomes).</summary>
+        public static IReadOnlyList<Biome> Biomes => Registry.Biomes;
+
+        /// <summary>The biome with this id; unknown ids give the neutral temperate biome.</summary>
+        public static Biome GetBiome(string? id) => Registry.GetBiome(id);
+
+        /// <summary>Unity colour of a core colour (biome ground colours for cameras and tilemaps).</summary>
+        public static Color32 ToColor(Rgba c) => new Color32(c.R, c.G, c.B, c.A);
+
         /// <summary>A genome of a given archetype (searches seeds deterministically from 'seed').</summary>
-        public static CreatureGenome SampleArchetype(string familyId, string archetypeId, ulong seed)
+        public static CreatureGenome SampleArchetype(string familyId, string archetypeId, ulong seed, string? biomeId = null)
         {
             var family = Registry.GetFamily(familyId);
+            var biome = GetBiome(biomeId);
             for (ulong k = 0; k < 4096; k++)
             {
-                var g = GenomeFactory.Sample(family, seed + k * 7919UL);
+                var g = GenomeFactory.Sample(family, seed + k * 7919UL, biome);
                 if (!g.Schema.Contains("form") || g.GetChoice("form") == archetypeId) return g;
             }
-            return GenomeFactory.Sample(family, seed);
+            return GenomeFactory.Sample(family, seed, biome);
         }
 
         public static ulong SeedFromText(string text) => StableHash.SeedFromText(text ?? string.Empty);

@@ -40,6 +40,9 @@ namespace PixelCreatures.Unity
             Batch.Clear();
             _driver = null;
             _renderers = new ThreadLocal<CreatureRenderer>(() => new CreatureRenderer());
+            Parallel = true;
+            LastBatchSize = 0;
+            LastFlushMs = 0;
         }
 
         /// <summary>A renderer for the calling thread (renderers are not thread safe; one per thread).</summary>
@@ -56,7 +59,8 @@ namespace PixelCreatures.Unity
         private static void EnsureDriver()
         {
             if (_driver != null || !Application.isPlaying) return;
-            var go = new GameObject("PixelCreatureRenderQueue") { hideFlags = HideFlags.HideAndDontSave };
+            // a hidden scene object (not DontSave): it lives in the DontDestroyOnLoad scene and ends with play mode
+            var go = new GameObject("PixelCreatureRenderQueue") { hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector | HideFlags.NotEditable };
             UnityEngine.Object.DontDestroyOnLoad(go);
             _driver = go.AddComponent<PixelCreatureRenderDriver>();
         }
@@ -67,28 +71,39 @@ namespace PixelCreatures.Unity
             if (Pending.Count == 0) { LastBatchSize = 0; return; }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Batch.Clear();
-            for (int i = 0; i < Pending.Count; i++)
-            {
-                var a = Pending[i];
-                if (a != null && a.isActiveAndEnabled && a.PrepareRaster()) Batch.Add(a);
-            }
+            // take the pending list first: one failing actor must never block the queue for every frame after it
+            var pending = Pending.ToArray();
             Pending.Clear();
+            foreach (var a in pending)
+            {
+                if (a == null || !a.isActiveAndEnabled) continue;
+                try { if (a.PrepareRaster()) Batch.Add(a); }
+                catch (Exception e) { a.ReportRenderError(e.Message); }
+            }
             LastBatchSize = Batch.Count;
-            if (Batch.Count > 1 && Parallel && PixelCreatureRuntime.ThreadsSupported)
+            try
             {
-                System.Threading.Tasks.Parallel.For(0, Batch.Count, i => Batch[i].Rasterize(_renderers.Value!));
+                // Rasterize catches its own exceptions (reported in Upload on the main thread)
+                if (Batch.Count > 1 && Parallel && PixelCreatureRuntime.ThreadsSupported)
+                    System.Threading.Tasks.Parallel.For(0, Batch.Count, i => Batch[i].Rasterize(_renderers.Value!));
+                else
+                {
+                    var r = _renderers.Value!;
+                    for (int i = 0; i < Batch.Count; i++) Batch[i].Rasterize(r);
+                }
+                for (int i = 0; i < Batch.Count; i++)
+                {
+                    var a = Batch[i];
+                    if (a == null) continue;
+                    try { a.Upload(); }
+                    catch (Exception e) { a.ReportRenderError(e.Message); }
+                }
             }
-            else
+            finally
             {
-                var r = _renderers.Value!;
-                for (int i = 0; i < Batch.Count; i++) Batch[i].Rasterize(r);
+                Batch.Clear();
+                LastFlushMs = sw.Elapsed.TotalMilliseconds;
             }
-            for (int i = 0; i < Batch.Count; i++)
-            {
-                if (Batch[i] != null) Batch[i].Upload();
-            }
-            Batch.Clear();
-            LastFlushMs = sw.Elapsed.TotalMilliseconds;
         }
 
         internal static void DriverDestroyed(PixelCreatureRenderDriver driver)

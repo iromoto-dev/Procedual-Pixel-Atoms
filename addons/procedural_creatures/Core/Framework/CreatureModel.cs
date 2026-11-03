@@ -22,7 +22,7 @@ namespace PixelCreatures.Core
         /// folded wings, new archetypes and shapes).
         /// </summary>
         public const int GeneratorVersion = 2;
-        public const string FrameworkVersion = "1.1.0";
+        public const string FrameworkVersion = "1.2.0";
         /// <summary>
         /// Recommended pixel density (output pixels per world unit) for HD sprites: shapes, features and
         /// high density anatomy details are rasterized at twice the classic resolution. See ViewSpec.Density.
@@ -51,6 +51,30 @@ namespace PixelCreatures.Core
         }
 
         public ulong ModelKey => StableHash.Combine(StableHash.Combine(Anatomy.AnatomyKey, Palette.ColorKey), StableHash.Combine(Surface.PatternKey, Motion.MotionKey));
+
+        private readonly object _overlayLock = new object();
+        private Dictionary<ulong, CreaturePalette>? _overlayPalettes;
+
+        /// <summary>
+        /// The palette to render and colour a frame with under an environment overlay: the creation's palette plus
+        /// the overlay's cover and grime ramps, colour graded. Returns Palette itself when the overlay needs no
+        /// colours. Cached per overlay (thread safe).
+        /// </summary>
+        public CreaturePalette PaletteFor(in BiomeOverlay overlay)
+        {
+            if (!overlay.NeedsPalette) return Palette;
+            ulong key = overlay.Key;
+            lock (_overlayLock)
+            {
+                _overlayPalettes ??= new Dictionary<ulong, CreaturePalette>();
+                if (_overlayPalettes.TryGetValue(key, out var p)) return p;
+                p = Palette.WithOverlay(overlay);
+                // a handful of looks per model at most; drop them all when a tool cycles through many
+                if (_overlayPalettes.Count >= 16) _overlayPalettes.Clear();
+                _overlayPalettes[key] = p;
+                return p;
+            }
+        }
     }
 
     /// <summary>Bounded least-recently-used cache (thread safe).</summary>
@@ -217,30 +241,55 @@ namespace PixelCreatures.Core
         public static readonly ulong[] UncuratedSeeds = { 101, 202, 303, 404, 505, 606, 707, 808 };
 
         /// <summary>A brand new creature of a family from a seed. Deterministic.</summary>
-        public static CreatureGenome Sample(ICreatureFamily family, ulong seed)
+        public static CreatureGenome Sample(ICreatureFamily family, ulong seed) => Sample(family, seed, null);
+
+        /// <summary>
+        /// A brand new creature of a family from a seed, adapted to a biome (archetype, colour and gene biases).
+        /// Null or the temperate biome give exactly the same genome as Sample(family, seed). Deterministic.
+        /// </summary>
+        public static CreatureGenome Sample(ICreatureFamily family, ulong seed, Biome? biome)
         {
+            if (biome != null && biome.IsNeutralSampling) biome = null;
             var schema = family.Schema;
             var values = new double[schema.Count];
             for (int i = 0; i < values.Length; i++) values[i] = schema.Genes[i].Default;
             var archRng = Rng.Derive(seed, "archetype." + family.Id);
             var weights = new List<double>();
-            foreach (var a in family.Archetypes) weights.Add(a.Weight);
+            double total = 0;
+            foreach (var a in family.Archetypes)
+            {
+                double w = biome == null ? a.Weight : a.Weight * biome.ArchetypeFactor(family, a.Id);
+                weights.Add(w);
+                total += w;
+            }
+            if (total <= 1e-12)
+            {
+                // a biome that excludes every archetype of a family falls back to the family's own weights
+                weights.Clear();
+                foreach (var a in family.Archetypes) weights.Add(a.Weight);
+            }
             string arch = family.Archetypes[archRng.Weighted(weights)].Id;
             family.SampleAnatomy(values, Rng.Derive(seed, "genes.anatomy." + family.Id), arch);
             var hints = family.StyleHints(arch);
+            if (biome != null) hints = biome.ApplyHints(hints, family, arch);
             SharedGenes.SampleColor(schema, values, Rng.Derive(seed, "genes.color"), hints);
             SharedGenes.SamplePattern(schema, values, Rng.Derive(seed, "genes.pattern"), hints);
             SharedGenes.SampleMotion(schema, values, Rng.Derive(seed, "genes.motion"), hints);
             family.AdjustSample(values, Rng.Derive(seed, "genes.adjust." + family.Id), arch);
+            biome?.ApplyGenes(schema, values, family, arch);
             var seeds = CreatureGenome.DeriveStreamSeeds(seed);
             string name = NameGenerator.Generate(Rng.Derive(seed, "name"));
             return new CreatureGenome(schema, CreatureFramework.GeneratorVersion, seeds, values, name, GenomeLineage.Sampled);
         }
 
         /// <summary>Regenerates all unlocked genes from a new seed (locks keep their values).</summary>
-        public static CreatureGenome RegenerateUnlocked(ICreatureFamily family, CreatureGenome current, GeneLocks locks, ulong seed)
+        public static CreatureGenome RegenerateUnlocked(ICreatureFamily family, CreatureGenome current, GeneLocks locks, ulong seed) =>
+            RegenerateUnlocked(family, current, locks, seed, null);
+
+        /// <summary>Regenerates all unlocked genes from a new seed in a biome (locks keep their values).</summary>
+        public static CreatureGenome RegenerateUnlocked(ICreatureFamily family, CreatureGenome current, GeneLocks locks, ulong seed, Biome? biome)
         {
-            var fresh = Sample(family, seed);
+            var fresh = Sample(family, seed, biome);
             var result = GenomeOps.Regenerate(current, locks, fresh);
             return result.WithName(locks.IsEmpty ? fresh.Name : current.Name);
         }

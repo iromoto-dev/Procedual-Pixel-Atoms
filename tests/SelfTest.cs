@@ -88,6 +88,7 @@ namespace PixelCreatures.Tests
             await _runner.RunAsync("runtime.samples_load_and_build", SamplesLoad);
             await _runner.RunAsync("runtime.async_build_discards_stale_results", AsyncBuild);
             await _runner.RunAsync("runtime.actor_renders_and_uploads", ActorRenders);
+            await _runner.RunAsync("runtime.biome_actors_render_their_look", BiomeActors);
             await _runner.RunAsync("runtime.preset_io_and_invalid_presets", PresetIo);
             await _runner.RunAsync("runtime.spritesheet_export_metadata", SpritesheetExport);
             await _runner.RunAsync("runtime.no_node_or_memory_leaks", LeakCheck);
@@ -169,6 +170,41 @@ namespace PixelCreatures.Tests
             }
             ctx.Metric("actors", actors.Count);
             foreach (var a in actors) a.QueueFree();
+            await Frames(2);
+        }
+
+        private async Task BiomeActors(TestContext ctx)
+        {
+            // every biome: a creature, a tree and a prop sampled in the biome render with its look, without errors
+            var actors = new List<(CreatureActor actor, string biome)>();
+            foreach (var b in CreatureRuntime.Biomes)
+            {
+                foreach (var fam in new[] { "quadruped", "flora", "prop" })
+                {
+                    var actor = NewActor();
+                    actor.Biome = b.Id;
+                    actor.SetGenome(CreatureRuntime.Sample(fam, 31, b.Id), async: false);
+                    actors.Add((actor, b.Id));
+                }
+            }
+            await Frames(12);
+            foreach (var (actor, biome) in actors)
+            {
+                string what = $"{biome}/{actor.Model?.Genome.FamilyId}";
+                ctx.True(actor.RenderCount > 0 && actor.Texture != null, $"{what}: rendered");
+                ctx.True(string.IsNullOrEmpty(actor.LastError), $"{what}: {actor.LastError}");
+                ctx.True(actor.EffectiveOverlay.IsActive == (biome != Biomes.TemperateId), $"{what}: overlay active only outside the temperate biome");
+                if (actor.EffectiveOverlay.NeedsPalette) ctx.True(actor.FramePalette != null && actor.FramePalette.HasOverlay, $"{what}: frame coloured with the overlay palette");
+            }
+            // switching the biome look of a live actor re-renders it with the new palette
+            var snow = actors.First(a => a.biome == "snow" && a.actor.Model?.Genome.FamilyId == "quadruped").actor;
+            ulong before = snow.Frame!.ContentHash();
+            snow.BiomeIntensity = 0;
+            await Frames(6);
+            ctx.True(snow.FramePalette != null && !snow.FramePalette.HasOverlay, "intensity 0 renders without overlay");
+            ctx.True(before != snow.Frame!.ContentHash(), "the look changes the rasterized frame");
+            ctx.Metric("actors", actors.Count);
+            foreach (var (a, _) in actors) a.QueueFree();
             await Frames(2);
         }
 

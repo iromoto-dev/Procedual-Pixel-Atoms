@@ -35,6 +35,12 @@ namespace PixelCreatures.Harness
 
             var reg = Program.CreateRegistry();
             var factory = new CreatureFactory(reg);
+            // --biome=snow samples in a biome and renders its overlay; --no-overlay / --overlay-only isolate the two layers
+            Biome? biome = null;
+            foreach (var a in args) if (a.StartsWith("--biome=")) biome = reg.GetBiome(a.Substring(8));
+            Biome? sampleBiome = args.Contains("--overlay-only") ? null : biome;
+            _overlay = biome != null && !args.Contains("--no-overlay") ? biome.Overlay : BiomeOverlay.None;
+            _biome = _overlay.IsActive ? biome : null;
             var families = reg.Families.Where(f => filter.Length == 0 || filter.Split(',').Contains(f.Id)).ToList();
             var rows = new List<(string label, List<CreatureModel> models)>();
             foreach (var f in families)
@@ -42,7 +48,7 @@ namespace PixelCreatures.Harness
                 if (!byArch)
                 {
                     var list = new List<CreatureModel>();
-                    for (int i = 0; i < count; i++) list.Add(factory.Build(GenomeFactory.Sample(f, seed0 + (ulong)i * 101)));
+                    for (int i = 0; i < count; i++) list.Add(factory.Build(GenomeFactory.Sample(f, seed0 + (ulong)i * 101, sampleBiome)));
                     rows.Add((f.DisplayName, list));
                     continue;
                 }
@@ -53,9 +59,9 @@ namespace PixelCreatures.Harness
                     int guard = 0;
                     while (list.Count < count && guard++ < 4000)
                     {
-                        var g = GenomeFactory.Sample(f, s);
+                        var g = GenomeFactory.Sample(f, s, sampleBiome);
                         s += 7;
-                        if (ArchetypeOf(f, s - 7) != arch.Id) continue;
+                        if (!g.Schema.Contains("form") || g.GetChoice("form") != arch.Id) continue;
                         list.Add(factory.Build(g));
                     }
                     rows.Add((f.DisplayName + " / " + arch.Label, list));
@@ -70,8 +76,10 @@ namespace PixelCreatures.Harness
                 var all = new List<CreatureModel>();
                 foreach (var r in rows) all.AddRange(r.models);
                 rows.Clear();
+                string title = families[0].DisplayName;
+                foreach (var a in args) if (a.StartsWith("--title=")) title = a.Substring(8);
                 for (int i = 0; i < all.Count; i += grid)
-                    rows.Add(($"{families[0].DisplayName} {i / grid + 1}", all.GetRange(i, Math.Min(grid, all.Count - i))));
+                    rows.Add(($"{title}{(all.Count > grid ? " " + (i / grid + 1) : "")}", all.GetRange(i, Math.Min(grid, all.Count - i))));
             }
             // render every cell first to size the grid
             var cells = new List<List<(byte[] rgba, int w, int h, int ox, int oy, string name)>>();
@@ -109,8 +117,8 @@ namespace PixelCreatures.Harness
                 height += (u + d + 6) * scale + 10 + labelH;
             }
             var canvas = new ImageCanvas(width, height, new Rgba(38, 44, 52, 255));
-            var bg = new Rgba(58, 72, 64, 255);
-            var bg2 = new Rgba(62, 77, 68, 255);
+            var bg = biome != null ? biome.Ground : new Rgba(58, 72, 64, 255);
+            var bg2 = biome != null ? biome.GroundShade : new Rgba(62, 77, 68, 255);
             int y = 4;
             for (int r = 0; r < rows.Count; r++)
             {
@@ -130,11 +138,14 @@ namespace PixelCreatures.Harness
                 y += cellH + labelH;
             }
             Directory.CreateDirectory(outDir);
-            string file = Path.Combine(outDir, $"sheet_{(filter.Length == 0 ? "all" : filter.Replace(',', '_'))}{(byArch ? "_arch" : "")}{(walk ? "_walk" : "")}{(grid > 0 ? "_g" + grid : "")}_d{dir}_x{density}.png");
+            string file = Path.Combine(outDir, $"sheet_{(filter.Length == 0 ? "all" : filter.Replace(',', '_'))}{(byArch ? "_arch" : "")}{(walk ? "_walk" : "")}{(grid > 0 ? "_g" + grid : "")}{(biome != null ? "_" + biome.Id + (sampleBiome == null ? "_ovl" : _overlay.IsActive ? "" : "_samp") : "")}_d{dir}_x{density}.png");
             File.WriteAllBytes(file, canvas.ToPng());
             Console.WriteLine($"{file} ({width}x{height})");
             return 0;
         }
+
+        private static BiomeOverlay _overlay;
+        private static Biome? _biome;
 
         private static string ArchetypeOf(ICreatureFamily f, ulong seed)
         {
@@ -162,11 +173,13 @@ namespace PixelCreatures.Harness
             var frame = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
             var view = ViewSpec.Default(motor.Yaw, density);
             view.RootOffset = new Vec3(0, motor.Altitude, 0);
-            new CreatureRenderer().Render(m.Anatomy, m.Palette, m.Surface, motor.Pose, view, frame);
+            view.Overlay = _biome != null ? _biome.OverlayFor(m) : BiomeOverlay.None;
+            var palette = m.PaletteFor(view.Overlay);
+            new CreatureRenderer().Render(m.Anatomy, palette, m.Surface, motor.Pose, view, frame);
             var lut = new byte[256 * 4];
-            m.Palette.BuildLut(lut, 0);
+            palette.BuildLut(lut, 0);
             var rgba = new byte[frame.Width * frame.Height * 4];
-            frame.ToRgba(lut, rgba, m.Palette.WaterTint);
+            frame.ToRgba(lut, rgba, palette.WaterTint);
             string arch = m.Anatomy.Traits.Count > 0 ? m.Anatomy.Traits[0] : m.Genome.Name;
             return (rgba, frame.Width, frame.Height, c.OriginX, c.OriginY, arch);
         }

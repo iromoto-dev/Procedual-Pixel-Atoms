@@ -15,6 +15,7 @@ using PixelCreatures.Core;
 using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Genetics;
 using PixelCreatures.Core.Motion;
+using PixelCreatures.Core.Palettes;
 using PixelCreatures.Core.Rendering;
 
 namespace PixelCreatures.Runtime
@@ -32,6 +33,29 @@ namespace PixelCreatures.Runtime
         [Export] public string FamilyId { get; set; } = "quadruped";
         /// <summary>Seed text (number or any text) used when no preset is given.</summary>
         [Export] public string SeedText { get; set; } = "1";
+        /// <summary>
+        /// Biome id (temperate, desert, snow, jungle, swamp, volcanic): adapts creations sampled from FamilyId/SeedText
+        /// and dresses the sprite with the biome look (snow caps, sand, moss, mud, wet glints, colour grade).
+        /// </summary>
+        [Export]
+        public string Biome
+        {
+            get => _biome;
+            set { _biome = string.IsNullOrEmpty(value) ? PixelCreatures.Core.Biomes.TemperateId : value; RequestRender(); }
+        }
+        /// <summary>Strength of the biome look (0 = off, 1 = as defined, up to 2 = heavy).</summary>
+        [Export(PropertyHint.Range, "0,2,0.05")]
+        public float BiomeIntensity
+        {
+            get => _biomeIntensity;
+            set { _biomeIntensity = Math.Clamp(value, 0f, 2f); RequestRender(); }
+        }
+        /// <summary>Overlay used instead of the biome's (code driven looks). Null = the biome's overlay.</summary>
+        public BiomeOverlay? OverlayOverride { get => _overlayOverride; set { _overlayOverride = value; RequestRender(); } }
+        /// <summary>Palette of the current Frame's indices (the overlay palette when a biome look is active).</summary>
+        public CreaturePalette? FramePalette => _framePalette ?? Model?.Palette;
+        /// <summary>The overlay the sprite is rendered with.</summary>
+        public BiomeOverlay EffectiveOverlay => _overlayOverride ?? CreatureRuntime.GetBiome(_biome).OverlayFor(Model, _biomeIntensity);
         /// <summary>Pose snapshots per second (pixel-art animation rate). 0 = every rendered frame.</summary>
         [Export(PropertyHint.Range, "0,60")] public int AnimationFps { get; set; } = 15;
         /// <summary>Classic stepped look: the node moves only on animation ticks.</summary>
@@ -64,8 +88,21 @@ namespace PixelCreatures.Runtime
             get => _scaleToWorld;
             set { _scaleToWorld = value; ApplySpriteScale(); QueueRedraw(); }
         }
-        /// <summary>The density actually used for rendering.</summary>
-        public double EffectiveDensity => _density > 0 ? Math.Max(1.0, _density) : Math.Max(1.0, CreatureRuntime.DefaultDensity);
+        /// <summary>
+        /// The density actually used for rendering: the requested one, reduced for very large creations so the
+        /// texture stays within the 1024 px frame limit (with room for poses beyond the rest canvas).
+        /// </summary>
+        public double EffectiveDensity
+        {
+            get
+            {
+                double d = _density > 0 ? Math.Max(1.0, _density) : Math.Max(1.0, CreatureRuntime.DefaultDensity);
+                var m = Model;
+                if (m == null) return d;
+                int edge = Math.Max(m.Anatomy.Canvas.Width, m.Anatomy.Canvas.Height);
+                return Math.Max(1.0, Math.Min(d, 1024 * 0.85 / Math.Max(1, edge)));
+            }
+        }
         /// <summary>Scale of node units to texture pixels (1 when the sprite is not scaled to the world).</summary>
         public double DisplayScale => _scaleToWorld ? 1.0 / EffectiveDensity : 1.0;
         /// <summary>Canvas of the current model at the effective density (texture pixels).</summary>
@@ -133,6 +170,10 @@ namespace PixelCreatures.Runtime
         private bool _needRaster = true;
         private double _lastFlash;
         private ViewSpec _view;
+        private string _biome = PixelCreatures.Core.Biomes.TemperateId;
+        private float _biomeIntensity = 1f;
+        private BiomeOverlay? _overlayOverride;
+        private CreaturePalette? _renderPalette, _framePalette;
         private CreaturePose? _renderPose;
         private int _pendingGrowL, _pendingGrowR, _pendingGrowT, _pendingGrowB;
         private int _pendingSteps;
@@ -163,7 +204,7 @@ namespace PixelCreatures.Runtime
             {
                 if (!string.IsNullOrEmpty(PresetPath)) LoadPreset(PresetPath);
                 else if (!string.IsNullOrEmpty(FamilyId) && CreatureRuntime.Registry.TryGetFamily(FamilyId, out _))
-                    SetGenome(CreatureRuntime.Sample(FamilyId, StableHash.SeedFromText(SeedText)), async: false);
+                    SetGenome(CreatureRuntime.Sample(FamilyId, StableHash.SeedFromText(SeedText), _biome), async: false);
             }
         }
 
@@ -230,6 +271,9 @@ namespace PixelCreatures.Runtime
         {
             var oldMotor = Motor;
             Model = model;
+            // a view snapshot taken earlier in this frame belongs to the previous model's palette
+            _renderPalette = null;
+            _framePalette = null;
             Motor = new CreatureMotor(model, CreatureRuntime.Registry, new MotorOptions { Facing = Facing, InternalDrive = AutoMove });
             double yaw = oldMotor?.Yaw ?? PixelCamera.DirectionYaw(7);
             Motor.Teleport(new Vec3(GroundPosition.X, 0, GroundPosition.Y), yaw);
@@ -368,7 +412,11 @@ namespace PixelCreatures.Runtime
                 else Motor.SetWorldPosition(new Vec3(GroundPosition.X, 0, GroundPosition.Y));
                 Motor.Step(_clock.StepSize);
                 if (AutoMove && CanMove != null && !CanMove(new Vector2((float)before.X, (float)before.Z), new Vector2((float)Motor.Position.X, (float)Motor.Position.Z)))
-                    Motor.Teleport(before, Motor.Yaw);
+                {
+                    // stay in place without resetting the gait (Teleport would snap the legs every step)
+                    Motor.Context.Position = before;
+                    Motor.Context.Velocity = Vec3.Zero;
+                }
                 _sinceRender += _clock.StepSize;
             }
             if (AutoMove) GroundPosition = new Vector2((float)Motor.Position.X, (float)Motor.Position.Z);
@@ -451,6 +499,8 @@ namespace PixelCreatures.Runtime
             _view.DrawShadow = DrawShadow;
             _view.Quality = Quality;
             _view.WaterLevel = WaterLevel;
+            _view.Overlay = EffectiveOverlay;
+            _renderPalette = Model?.PaletteFor(_view.Overlay);
         }
 
         /// <summary>Worker thread: rasterizes the snapshot pose into the RGBA buffer. No engine calls.</summary>
@@ -462,7 +512,9 @@ namespace PixelCreatures.Runtime
             if (model == null || frame == null || pose == null) return;
             if (_needRaster)
             {
-                var stats = renderer.Render(model.Anatomy, model.Palette, model.Surface, pose, _view, frame);
+                // the frame's indices and its colour lookup must come from the same (overlay) palette
+                _framePalette = _renderPalette ?? model.Palette;
+                var stats = renderer.Render(model.Anatomy, _framePalette, model.Surface, pose, _view, frame);
                 LastStats = stats;
                 if (stats.Overflow)
                 {
@@ -473,8 +525,9 @@ namespace PixelCreatures.Runtime
                 }
             }
             double flash = Motor?.HitFlash ?? 0;
-            model.Palette.BuildLut(_lut, flash);
-            frame.ToRgba(_lut, _rgba, model.Palette.WaterTint);
+            var palette = _framePalette ?? model.Palette;
+            palette.BuildLut(_lut, flash);
+            frame.ToRgba(_lut, _rgba, palette.WaterTint);
             RenderCount++;
         }
 

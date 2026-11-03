@@ -19,7 +19,7 @@ namespace PixelCreatures.Workshop
         private readonly Dictionary<string, Button> _groupLocks = new Dictionary<string, Button>();
         private readonly Dictionary<string, VBoxContainer> _groupBodies = new Dictionary<string, VBoxContainer>();
         private readonly HashSet<string> _collapsed = new HashSet<string>();
-        private HBoxContainer? _swatches;
+        private HFlowContainer? _swatches;
         private string _schemaFamily = string.Empty;
         private bool _updating;
         private VBoxContainer _content = null!;
@@ -73,8 +73,10 @@ namespace PixelCreatures.Workshop
                 };
                 if (group.Stream == GeneStream.Color)
                 {
-                    _swatches = new HBoxContainer();
-                    _swatches.AddThemeConstantOverride("separation", 1);
+                    // wraps: palettes of 30+ colours must not widen the editor (and squeeze the preview)
+                    _swatches = new HFlowContainer();
+                    _swatches.AddThemeConstantOverride("h_separation", 1);
+                    _swatches.AddThemeConstantOverride("v_separation", 1);
                     body.AddChild(_swatches);
                 }
                 foreach (var gene in schema.GenesInGroup(gid)) body.AddChild(GeneRow(gene));
@@ -107,7 +109,9 @@ namespace PixelCreatures.Workshop
             {
                 case GeneKind.Choice:
                 {
-                    var opt = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill, FocusMode = FocusModeEnum.None, TooltipText = label.TooltipText };
+                    // fixed width with clipped labels: long option names must not widen the editor (and squeeze the preview)
+                    var opt = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill, FocusMode = FocusModeEnum.None, TooltipText = label.TooltipText,
+                        FitToLongestItem = false, ClipText = true, CustomMinimumSize = new Vector2(120, 0) };
                     foreach (var o in gene.Options) opt.AddItem(o.Label);
                     opt.ItemSelected += idx => { if (!_updating) _state.SetGene(id, idx, false); };
                     row.AddChild(opt);

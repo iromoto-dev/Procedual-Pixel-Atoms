@@ -24,14 +24,15 @@ namespace PixelCreatures.Workshop
     /// <summary>Draws the ground as world anchored tiles around the camera.</summary>
     public partial class GroundLayer : Node2D
     {
-        private static readonly Dictionary<StageBackground, ImageTexture> Cache = new Dictionary<StageBackground, ImageTexture>();
+        private static readonly Dictionary<(StageBackground, string), ImageTexture> Cache = new Dictionary<(StageBackground, string), ImageTexture>();
         public StageBackground Kind = StageBackground.Grass;
         public new Rect2 Visible;
         public const int TileSize = 128;
 
         public static ImageTexture TileFor(StageBackground kind)
         {
-            if (Cache.TryGetValue(kind, out var t)) return t;
+            var key = (kind, EnvironmentArt.Theme.Id);
+            if (Cache.TryGetValue(key, out var t)) return t;
             var gk = kind switch
             {
                 StageBackground.Meadow => GroundKind.Meadow,
@@ -41,7 +42,7 @@ namespace PixelCreatures.Workshop
                 _ => GroundKind.Grass,
             };
             t = ImageTexture.CreateFromImage(EnvironmentArt.GroundTile(gk, TileSize, 1234 + (ulong)kind));
-            Cache[kind] = t;
+            Cache[key] = t;
             return t;
         }
 

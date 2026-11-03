@@ -20,26 +20,34 @@ namespace PixelCreatures.Workshop
 
     public static partial class EnvironmentArt
     {
-        // ------------------------------------------------------------------ palette
-        public static readonly Color Grass0 = Color.Color8(58, 100, 58);
-        public static readonly Color Grass1 = Color.Color8(80, 132, 66);
-        public static readonly Color Grass2 = Color.Color8(101, 154, 74);
-        public static readonly Color Grass3 = Color.Color8(132, 180, 90);
-        public static readonly Color Dirt0 = Color.Color8(104, 78, 60);
-        public static readonly Color Dirt1 = Color.Color8(132, 102, 74);
-        public static readonly Color Dirt2 = Color.Color8(158, 126, 90);
-        public static readonly Color Sand0 = Color.Color8(178, 154, 106);
-        public static readonly Color Sand1 = Color.Color8(206, 184, 130);
-        public static readonly Color Sand2 = Color.Color8(226, 208, 156);
-        public static readonly Color Water0 = Color.Color8(40, 76, 122);
-        public static readonly Color Water1 = Color.Color8(52, 100, 150);
-        public static readonly Color Water2 = Color.Color8(78, 138, 180);
-        public static readonly Color Foam = Color.Color8(196, 228, 236);
-        public static readonly Color Stone0 = Color.Color8(78, 80, 92);
-        public static readonly Color Stone1 = Color.Color8(108, 110, 120);
-        public static readonly Color Stone2 = Color.Color8(142, 142, 148);
-        public static readonly Color Stone3 = Color.Color8(178, 176, 176);
-        public static readonly Color[] Flowers = { Color.Color8(238, 206, 88), Color.Color8(238, 234, 222), Color.Color8(222, 128, 158), Color.Color8(126, 152, 224) };
+        // ------------------------------------------------------------------ palette (from the biome theme)
+
+        /// <summary>Colours of the landscape. Set on the main thread before generating a map or tiles.</summary>
+        public static GroundTheme Theme { get; set; } = GroundTheme.Temperate;
+
+        public static Color Grass0 => Theme.Grass0;
+        public static Color Grass1 => Theme.Grass1;
+        public static Color Grass2 => Theme.Grass2;
+        public static Color Grass3 => Theme.Grass3;
+        public static Color Dirt0 => Theme.Dirt0;
+        public static Color Dirt1 => Theme.Dirt1;
+        public static Color Dirt2 => Theme.Dirt2;
+        public static Color Sand0 => Theme.Sand0;
+        public static Color Sand1 => Theme.Sand1;
+        public static Color Sand2 => Theme.Sand2;
+        public static Color Water0 => Theme.Water0;
+        public static Color Water1 => Theme.Water1;
+        public static Color Water2 => Theme.Water2;
+        public static Color Foam => Theme.Foam;
+        public static Color Stone0 => Theme.Stone0;
+        public static Color Stone1 => Theme.Stone1;
+        public static Color Stone2 => Theme.Stone2;
+        public static Color Stone3 => Theme.Stone3;
+        public static Color[] Flowers => Theme.Flowers;
+        private static Color WaterDeep => Theme.Id == Biomes.TemperateId ? Color.Color8(22, 65, 91) : Theme.Water0.Darkened(0.35f);
+        private static Color WaterShallow => Theme.Id == Biomes.TemperateId ? Color.Color8(69, 139, 145) : Theme.Water2.Darkened(0.05f);
+        internal static Color ReliefWaterDeep => Theme.Id == Biomes.TemperateId ? Color.Color8(21, 61, 89) : Theme.Water0.Darkened(0.35f);
+        internal static Color ReliefWaterShallow => Theme.Id == Biomes.TemperateId ? Color.Color8(75, 151, 145) : Theme.Water2;
 
         private static double Hash(ulong seed, int x, int y, int z = 0) => StableHash.Hash01(seed, x, y, z);
 
@@ -99,7 +107,7 @@ namespace PixelCreatures.Workshop
                         case GroundKind.Dirt: c = n < 0.38 ? Dirt0 : (n > 0.66 ? Dirt2 : Dirt1); break;
                         case GroundKind.Sand: c = n < 0.4 ? Sand0 : (n > 0.7 ? Sand2 : Sand1); break;
                         case GroundKind.Water:
-                            c = Color.Color8(22, 65, 91).Lerp(Color.Color8(69, 139, 145), (float)(Math.Floor(n * 7) / 7));
+                            c = WaterDeep.Lerp(WaterShallow, (float)(Math.Floor(n * 7) / 7));
                             double caustic = Math.Sin(x * Math.PI / 16 + Math.Sin(y * Math.PI / 16) * 1.5) + Math.Cos(y * Math.PI / 8);
                             if (caustic > 1.78) c = c.Lightened(0.08f);
                             break;
@@ -109,7 +117,7 @@ namespace PixelCreatures.Workshop
                     Put(buf, size, size, x, y, c);
                 }
             }
-            if (kind == GroundKind.Grass || kind == GroundKind.Meadow) GrassTufts(buf, size, size, seed, kind == GroundKind.Meadow ? 0.05 : 0.012, true);
+            if (kind == GroundKind.Grass || kind == GroundKind.Meadow) GrassTufts(buf, size, size, seed, (kind == GroundKind.Meadow ? 0.05 : 0.012) * Theme.Vegetation, true);
             if (kind == GroundKind.Dirt) Pebbles(buf, size, size, seed, Dirt0, Dirt2, 0.05, true);
             if (kind == GroundKind.Sand) Pebbles(buf, size, size, seed, Sand0, Sand2, 0.03, true);
             if (kind == GroundKind.Water) WaterGlints(buf, size, size, seed, 0, true);
@@ -126,7 +134,7 @@ namespace PixelCreatures.Workshop
                     double r = Hash(seed + 11, cx, cy);
                     int x = cx * cell + (int)(Hash(seed + 12, cx, cy) * (cell - 2)) + 1;
                     int y = cy * cell + (int)(Hash(seed + 13, cx, cy) * (cell - 2)) + 1;
-                    if (r < 0.34)
+                    if (r < 0.34 * Math.Min(1.0, Theme.Vegetation))
                     {
                         // small tuft: dark base, light tip (lit from the upper left)
                         Set(buf, w, h, x, y + 1, Grass0, wrap);
@@ -194,7 +202,8 @@ namespace PixelCreatures.Workshop
             // trunk
             int trunkH = (int)(rng.Range(15, 20) * scale);
             int tw = Math.Max(3, (int)(4 * scale));
-            Color bark0 = Color.Color8(62, 44, 38), bark1 = Color.Color8(96, 68, 50), bark2 = Color.Color8(124, 92, 64);
+            var theme = Theme;
+            Color bark0 = theme.Bark0, bark1 = theme.Bark1, bark2 = theme.Bark2;
             for (int y = baseY - trunkH; y <= baseY; y++)
             {
                 int flare = y > baseY - 3 ? (baseY - y == 0 ? 2 : 1) : 0;
@@ -206,7 +215,7 @@ namespace PixelCreatures.Workshop
                 }
             }
             // canopy: union of blobs, shaded by the nearest blob normal
-            Color leaf0 = Color.Color8(36, 70, 48), leaf1 = Color.Color8(52, 98, 56), leaf2 = Color.Color8(74, 128, 62), leaf3 = Color.Color8(112, 162, 76), leafOut = Color.Color8(26, 48, 40);
+            Color leaf0 = theme.Leaf0, leaf1 = theme.Leaf1, leaf2 = theme.Leaf2, leaf3 = theme.Leaf3, leafOut = theme.LeafOutline;
             int n = rng.Range(6, 8);
             var cx = new double[n]; var cy = new double[n]; var cr = new double[n];
             double top = baseY - trunkH - 12 * scale;
@@ -317,7 +326,8 @@ namespace PixelCreatures.Workshop
             int bx = w / 2, by = h - 3;
             origin = new Vector2I(bx, by);
             Ellipse(buf, w, h, bx + 1, by, (int)(10 * scale), (int)(3 * scale), new Color(0.08f, 0.1f, 0.12f, 0.35f));
-            Color l0 = Color.Color8(40, 76, 50), l1 = Color.Color8(58, 106, 58), l2 = Color.Color8(82, 136, 66), l3 = Color.Color8(120, 170, 80), outC = Color.Color8(28, 52, 42);
+            var theme = Theme;
+            Color l0 = theme.Leaf0, l1 = theme.Leaf1, l2 = theme.Leaf2, l3 = theme.Leaf3, outC = theme.LeafOutline;
             int n = rng.Range(3, 5);
             var cx = new double[n]; var cy = new double[n]; var cr = new double[n];
             for (int i = 0; i < n; i++)

@@ -48,11 +48,22 @@ namespace PixelCreatures.Core.Export
         public int MaxPageSize = 8192;
         /// <summary>Pixel density of the frames (2 = HD sprites with high density anatomy). Root motion is reported in sprite pixels.</summary>
         public double Density = 1;
+        /// <summary>Environment look of the frames (snow, sand, moss ...; see Biome.Overlay). Default none.</summary>
+        public BiomeOverlay Overlay;
+        /// <summary>Biome id written into the metadata (informational).</summary>
+        public string Biome = string.Empty;
+        /// <summary>
+        /// Keep only the content of every captured frame (ExportedFrame.Frame becomes the cropped frame at
+        /// ExportedFrame.CropX/CropY inside the capture canvas). Cuts the memory of long exports several times.
+        /// </summary>
+        public bool CompactFrames;
     }
 
     public sealed class ExportedFrame
     {
         public PixelFrame Frame = null!;
+        /// <summary>Position of Frame inside the capture canvas (0, 0 unless SpritesheetOptions.CompactFrames).</summary>
+        public int CropX, CropY;
         public double Flash;
         public int Page, X, Y;
         public int DurationMs;
@@ -117,6 +128,7 @@ namespace PixelCreatures.Core.Export
                     {
                         if (f.Frame.ContentBounds(out int x0, out int y0, out int x1, out int y1))
                         {
+                            x0 += f.CropX; x1 += f.CropX; y0 += f.CropY; y1 += f.CropY;
                             ux0 = Math.Min(ux0, x0); uy0 = Math.Min(uy0, y0); ux1 = Math.Max(ux1, x1); uy1 = Math.Max(uy1, y1);
                         }
                     }
@@ -133,34 +145,46 @@ namespace PixelCreatures.Core.Export
             result.OriginX = ox - ux0 + pad;
             result.OriginY = oy - uy0 + pad;
 
-            // layout: one row per clip, rows are packed into pages below the size limit
+            // layout: one row per clip (clips longer than the page width wrap onto further rows), rows are
+            // packed into pages below the size limit
             int maxFrames = Math.Max(1, result.Clips.Max(c => c.Frames.Count));
-            int pageW = maxFrames * fw;
+            int perRow = Math.Max(1, Math.Min(maxFrames, opt.MaxPageSize / Math.Max(1, fw)));
+            int pageW = perRow * fw;
+            var rowsList = new List<(int clip, int first)>();
+            for (int c = 0; c < result.Clips.Count; c++)
+                for (int first = 0; first < Math.Max(1, result.Clips[c].Frames.Count); first += perRow) rowsList.Add((c, first));
             int rowsPerPage = Math.Max(1, opt.MaxPageSize / fh);
-            int pages = (result.Clips.Count + rowsPerPage - 1) / rowsPerPage;
+            int pages = (rowsList.Count + rowsPerPage - 1) / rowsPerPage;
             var lut = new byte[1024];
             var tmp = new byte[cw * ch * 4];
+            var palette = model.PaletteFor(opt.Overlay);
+            int innerW = fw - pad * 2;
             for (int p = 0; p < pages; p++)
             {
-                int rows = Math.Min(rowsPerPage, result.Clips.Count - p * rowsPerPage);
+                int rows = Math.Min(rowsPerPage, rowsList.Count - p * rowsPerPage);
                 int pageH = rows * fh;
                 var rgba = new byte[pageW * pageH * 4];
                 for (int r = 0; r < rows; r++)
                 {
-                    var clip = result.Clips[p * rowsPerPage + r];
-                    for (int i = 0; i < clip.Frames.Count; i++)
+                    var (ci, first) = rowsList[p * rowsPerPage + r];
+                    var clip = result.Clips[ci];
+                    for (int i = first; i < Math.Min(clip.Frames.Count, first + perRow); i++)
                     {
                         var f = clip.Frames[i];
                         f.Page = p;
-                        f.X = i * fw;
+                        f.X = (i - first) * fw;
                         f.Y = r * fh;
-                        model.Palette.BuildLut(lut, f.Flash);
-                        f.Frame.ToRgba(lut, tmp, model.Palette.WaterTint);
+                        palette.BuildLut(lut, f.Flash);
+                        var src = f.Frame;
+                        src.ToRgba(lut, tmp, palette.WaterTint);
+                        // canvas columns [ux0, ux0 + innerW) intersected with the stored frame
+                        int cx0 = Math.Max(ux0, f.CropX), cx1 = Math.Min(ux0 + innerW, f.CropX + src.Width);
+                        if (cx1 <= cx0) continue;
                         for (int y = 0; y < fh - pad * 2; y++)
                         {
-                            int sy = uy0 + y;
-                            if (sy < 0 || sy >= ch) continue;
-                            Array.Copy(tmp, (sy * cw + ux0) * 4, rgba, ((f.Y + pad + y) * pageW + f.X + pad) * 4, (fw - pad * 2) * 4);
+                            int sy = uy0 + y - f.CropY;
+                            if (sy < 0 || sy >= src.Height) continue;
+                            Array.Copy(tmp, (sy * src.Width + cx0 - f.CropX) * 4, rgba, ((f.Y + pad + y) * pageW + f.X + pad + cx0 - ux0) * 4, (cx1 - cx0) * 4);
                         }
                     }
                 }
@@ -169,6 +193,24 @@ namespace PixelCreatures.Core.Export
             result.MetadataJson = Metadata(model, result, opt, imageBaseName);
             progress?.Report(1.0);
             return result;
+        }
+
+        /// <summary>Replaces the frame by its content (CropX/CropY keep its place in the capture canvas).</summary>
+        private static void Compact(ExportedFrame f)
+        {
+            var full = f.Frame;
+            if (!full.ContentBounds(out int x0, out int y0, out int x1, out int y1)) { x0 = 0; y0 = 0; x1 = 1; y1 = 1; }
+            int w = x1 - x0, h = y1 - y0;
+            var c = new PixelFrame(w, h) { OriginX = full.OriginX - x0, OriginY = full.OriginY - y0 };
+            for (int y = 0; y < h; y++)
+            {
+                Array.Copy(full.Indices, (y0 + y) * full.Width + x0, c.Indices, y * w, w);
+                if (full.HasSubmerged) Array.Copy(full.Submerged, (y0 + y) * full.Width + x0, c.Submerged, y * w, w);
+            }
+            c.HasSubmerged = full.HasSubmerged;
+            f.Frame = c;
+            f.CropX = x0;
+            f.CropY = y0;
         }
 
         private static ExportedClip CaptureClip(CreatureModel model, CreatureRegistry registry, ClipKind kind, int dir, SpritesheetOptions opt,
@@ -199,8 +241,11 @@ namespace PixelCreatures.Core.Export
                     var view = ViewSpec.Default(motor.Yaw, Math.Max(1.0, opt.Density));
                     view.DrawShadow = opt.DrawShadow;
                     view.Quality = opt.Quality;
-                    renderer.Render(model.Anatomy, model.Palette, model.Surface, motor.Pose, view, frame);
-                    clip.Frames.Add(new ExportedFrame { Frame = frame, Flash = motor.HitFlash, DurationMs = (int)Math.Round(1000.0 / fps) });
+                    view.Overlay = opt.Overlay;
+                    renderer.Render(model.Anatomy, model.PaletteFor(opt.Overlay), model.Surface, motor.Pose, view, frame);
+                    var exported = new ExportedFrame { Frame = frame, Flash = motor.HitFlash, DurationMs = (int)Math.Round(1000.0 / fps) };
+                    if (opt.CompactFrames) Compact(exported);
+                    clip.Frames.Add(exported);
                     Steps(stepsPerFrame);
                 }
             }
@@ -330,7 +375,8 @@ namespace PixelCreatures.Core.Export
             for (int i = 0; i < r.Pages.Count; i++)
                 pages.Add(new JsonObject { ["file"] = r.Pages.Count == 1 ? baseName + ".png" : $"{baseName}_{i}.png", ["width"] = r.Pages[i].width, ["height"] = r.Pages[i].height });
             var palette = new JsonArray();
-            for (int i = CreaturePalette.FirstColorIndex; i < model.Palette.Colors.Count; i++) palette.Add(JsonValue.Create(model.Palette.Colors[i].ToHex()));
+            var colors = model.PaletteFor(opt.Overlay).Colors;
+            for (int i = CreaturePalette.FirstColorIndex; i < colors.Count; i++) palette.Add(JsonValue.Create(colors[i].ToHex()));
             var root = new JsonObject
             {
                 ["format"] = "ppc.spritesheet",
@@ -354,6 +400,9 @@ namespace PixelCreatures.Core.Export
                 ["palette"] = palette,
                 ["clips"] = clips,
             };
+            // only written for environment variants, so plain exports stay byte-identical to earlier versions
+            if (!string.IsNullOrEmpty(opt.Biome)) root["biome"] = opt.Biome;
+            if (opt.Overlay.IsActive) root["overlay"] = opt.Overlay.ToString();
             return root.ToJsonString();
         }
     }

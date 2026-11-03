@@ -461,7 +461,7 @@ namespace PixelCreatures.Workshop
                     buf[o + 3] = 255;
                 }
             }
-            var treeDot = Color.Color8(36, 70, 48);
+            var treeDot = Theme.Leaf0;
             foreach (var p in map.Props)
             {
                 if (p.Kind != PropKind.Tree) continue;

@@ -13,11 +13,12 @@ using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Genetics;
 using PixelCreatures.Core.Motion;
 using PixelCreatures.Core.Rendering;
+using PixelCreatures.Core.Export;
 using PixelCreatures.Core.Serialization;
 
 namespace PixelCreatures.Tests
 {
-    public static class CoreTests
+    public static partial class CoreTests
     {
         public static void RunAll(TestRunner r, CreatureRegistry registry, int seedsPerFamily = 100)
         {
@@ -39,6 +40,9 @@ namespace PixelCreatures.Tests
             r.Run("motion.states_and_directions_stay_in_canvas", ctx => CanvasSafety(ctx, registry, factory));
             r.Run("motion.turning_in_place_reorients_body", ctx => TurnInPlace(ctx, registry, factory));
             r.Run("anatomy.extreme_genes_build_move_and_render", ctx => ExtremeGenes(ctx, registry, factory));
+            r.Run("biome.sampling_neutral_deterministic_and_biased", ctx => BiomeSampling(ctx, registry, factory, Math.Max(6, seedsPerFamily / 4)));
+            r.Run("biome.overlay_render", ctx => BiomeOverlayRender(ctx, registry, factory));
+            r.Run("export.page_wrap_compact_and_overlay", ctx => ExportLayout(ctx, registry, factory));
         }
 
         // ------------------------------------------------------------------ math & random
@@ -371,6 +375,26 @@ namespace PixelCreatures.Tests
             return f.ContentHash();
         }
 
+        /// <summary>Render hash under an environment overlay: frame indices plus the (graded) palette colours.</summary>
+        public static ulong OverlayRenderHash(CreatureModel m, CreaturePose pose, double yaw, in BiomeOverlay overlay, double density = 1)
+        {
+            var frame = RenderOverlay(m, pose, yaw, overlay, density, out var palette);
+            ulong h = frame.ContentHash();
+            foreach (var col in palette.Colors) h = StableHash.Combine(h, col.Packed);
+            return h;
+        }
+
+        private static PixelFrame RenderOverlay(CreatureModel m, CreaturePose pose, double yaw, in BiomeOverlay overlay, double density, out PixelCreatures.Core.Palettes.CreaturePalette palette)
+        {
+            var c = m.Anatomy.Canvas.Scaled(density);
+            var f = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
+            var view = ViewSpec.Default(yaw, density);
+            view.Overlay = overlay;
+            palette = m.PaletteFor(overlay);
+            new CreatureRenderer().Render(m.Anatomy, palette, m.Surface, pose, view, f);
+            return f;
+        }
+
         /// <summary>
         /// Values checked against the golden table: genome content hash of seed 2024, the rest pose
         /// image and an image after 1.5 s of simulated walking (motion + rendering). Keys: family id,
@@ -393,6 +417,19 @@ namespace PixelCreatures.Tests
                 motor.DesiredVelocity = new Vec3(DMath.Cos(yaw), 0, -DMath.Sin(yaw)) * m.Motion.WalkSpeed;
                 for (int i = 0; i < 90; i++) motor.Step(FixedClock.DefaultStep);
                 yield return ($"{f.Id}:walk", RenderHash(m, motor.Pose, motor.Yaw));
+            }
+            // biomes: the biased genome of every family, and the overlay render of a creature, a tree and a prop
+            foreach (var b in reg.Biomes)
+            {
+                if (b.IsNeutralSampling) continue;
+                foreach (var f in reg.Families)
+                {
+                    var g = GenomeFactory.Sample(f, 2024, b);
+                    yield return ($"{f.Id}:biome:{b.Id}", g.ContentHash);
+                    if (f.Id != "quadruped" && f.Id != "flora" && f.Id != "prop") continue;
+                    var m = factory.Build(g);
+                    yield return ($"{f.Id}:biome:{b.Id}:render", OverlayRenderHash(m, new CreaturePose(m.Anatomy.Skeleton), PixelCamera.DirectionYaw(7), b.OverlayFor(m), CreatureFramework.HdDensity));
+                }
             }
         }
 
@@ -734,6 +771,163 @@ namespace PixelCreatures.Tests
     }
 
     /// <summary>Golden reference values (produced on Linux x64; must match on every platform).</summary>
+    public static partial class CoreTests
+    {
+        // ------------------------------------------------------------------ biomes
+
+        private static void BiomeSampling(TestContext ctx, CreatureRegistry reg, CreatureFactory factory, int seeds)
+        {
+            ctx.True(reg.Biomes.Count >= 6, $"built-in biomes registered ({reg.Biomes.Count})");
+            ctx.True(reg.GetBiome("unknown") == Biomes.Temperate && reg.GetBiome(null) == Biomes.Temperate, "unknown ids fall back to temperate");
+            foreach (var f in reg.Families)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    ulong seed = 3000UL + (ulong)i * 977;
+                    // the temperate biome (and null) must not change a single gene: existing seeds stay valid
+                    ctx.Equal(GenomeFactory.Sample(f, seed).ContentHash, GenomeFactory.Sample(f, seed, Biomes.Temperate).ContentHash, $"{f.Id}/{seed}: temperate is neutral");
+                }
+            }
+            foreach (var b in reg.Biomes)
+            {
+                if (b.IsNeutralSampling) continue;
+                foreach (var f in reg.Families)
+                {
+                    for (int i = 0; i < seeds; i++)
+                    {
+                        ulong seed = 5000UL + (ulong)i * 7919;
+                        var g = GenomeFactory.Sample(f, seed, b);
+                        ctx.Equal(g.ContentHash, GenomeFactory.Sample(f, seed, b).ContentHash, $"{b.Id}/{f.Id}/{seed}: deterministic");
+                        CreatureModel m;
+                        try { m = factory.Build(g); }
+                        catch (Exception e) { ctx.True(false, $"{b.Id}/{f.Id}/{seed}: build failed: {e.Message}"); continue; }
+                        ctx.True(m.Anatomy.Primitives.Count > 0, $"{b.Id}/{f.Id}/{seed}: anatomy");
+                    }
+                }
+            }
+            // the biases do what the biomes promise
+            double Mean(string family, Biome? b, Func<CreatureGenome, double> value, int n = 160)
+            {
+                var fam = reg.GetFamily(family);
+                double sum = 0;
+                for (int i = 0; i < n; i++) sum += value(GenomeFactory.Sample(fam, 900UL + (ulong)i * 31, b));
+                return sum / n;
+            }
+            double Share(string family, Biome? b, string arch) => Mean(family, b, g => g.GetChoice("form") == arch ? 1 : 0);
+            ctx.True(Share("flora", Biomes.Desert, "cactus") > Share("flora", null, "cactus") * 3, "desert: more cacti");
+            ctx.True(Share("flora", Biomes.Snow, "pine") > Share("flora", null, "pine") * 1.8, "snow: more conifers");
+            ctx.True(Share("flora", Biomes.Snow, "palm") == 0, "snow: no palms");
+            ctx.True(Share("biped", Biomes.Snow, "yeti") > Share("biped", null, "yeti") * 3, "snow: more yetis");
+            ctx.True(Share("serpent", Biomes.Desert, "sandworm") > Share("serpent", null, "sandworm") * 2.5, "desert: more sandworms");
+            ctx.True(Share("reptile", Biomes.Swamp, "crocodile") > Share("reptile", null, "crocodile") * 2, "swamp: more crocodiles");
+            ctx.True(Mean("flora", Biomes.Snow, g => g.Get("snow")) > 0.6, "snow: snowy crowns");
+            ctx.True(Mean("quadruped", Biomes.Snow, g => g.Get("color.value")) > Mean("quadruped", null, g => g.Get("color.value")) + 0.12, "snow: lighter coats");
+            ctx.True(Mean("quadruped", Biomes.Volcanic, g => g.Get("color.value")) < Mean("quadruped", null, g => g.Get("color.value")) - 0.08, "volcanic: darker coats");
+            ctx.True(Mean("quadruped", Biomes.Desert, g => g.Get("head.earSize")) > Mean("quadruped", null, g => g.Get("head.earSize")) + 0.08, "desert: bigger ears");
+            ctx.True(Mean("quadruped", Biomes.Jungle, g => g.Get("color.saturation")) > Mean("quadruped", null, g => g.Get("color.saturation")) + 0.08, "jungle: vivid coats");
+            // a biome never empties a family: a scope excluding every archetype falls back to the family weights
+            var none = new Biome("test-none", "None", "excludes every flora form");
+            foreach (var a in reg.GetFamily("flora").Archetypes) none.Archetype("flora", a.Id, 0);
+            ctx.True(GenomeFactory.Sample(reg.GetFamily("flora"), 7, none).Schema.Contains("form"), "all-zero archetype weights fall back");
+        }
+
+        private static void BiomeOverlayRender(TestContext ctx, CreatureRegistry reg, CreatureFactory factory)
+        {
+            double yaw = PixelCamera.DirectionYaw(7);
+            foreach (var id in new[] { "quadruped", "flora", "prop", "biped" })
+            {
+                var m = factory.Build(GenomeFactory.Sample(reg.GetFamily(id), 2024));
+                var pose = new CreaturePose(m.Anatomy.Skeleton);
+                // no overlay: same palette instance, bit-identical image
+                ctx.True(ReferenceEquals(m.PaletteFor(BiomeOverlay.None), m.Palette), $"{id}: no overlay keeps the palette");
+                var plain = RenderOverlay(m, pose, yaw, BiomeOverlay.None, 2, out _);
+                var c = m.Anatomy.Canvas.Scaled(2);
+                var reference = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
+                new CreatureRenderer().Render(m.Anatomy, m.Palette, m.Surface, pose, ViewSpec.Default(yaw, 2), reference);
+                ctx.Equal(reference.ContentHash(), plain.ContentHash(), $"{id}: inactive overlay renders identically");
+                foreach (var b in reg.Biomes)
+                {
+                    var o = b.OverlayFor(m);
+                    if (!o.IsActive) continue;
+                    var f = RenderOverlay(m, pose, yaw, o, 2, out var pal);
+                    ctx.Equal(OverlayRenderHash(m, pose, yaw, o, 2), OverlayRenderHash(m, pose, yaw, o, 2), $"{id}/{b.Id}: deterministic");
+                    ctx.True(pal.HasOverlay && ReferenceEquals(pal, m.PaletteFor(o)), $"{id}/{b.Id}: cached overlay palette");
+                    // silhouettes are unchanged: the overlay only recolours covered pixels
+                    int changedCoverage = 0, coverPixels = 0, grimePixels = 0;
+                    var cover = pal.CoverRamp != null ? new HashSet<byte>(pal.CoverRamp.Skip(1)) : new HashSet<byte>();
+                    var grime = pal.GrimeRamp != null ? new HashSet<byte>(pal.GrimeRamp.Skip(1)) : new HashSet<byte>();
+                    for (int i = 0; i < f.Indices.Length; i++)
+                    {
+                        if ((f.Indices[i] == 0) != (reference.Indices[i] == 0)) changedCoverage++;
+                        if (cover.Contains(f.Indices[i])) coverPixels++;
+                        else if (grime.Contains(f.Indices[i])) grimePixels++;
+                    }
+                    ctx.Equal(0, changedCoverage, $"{id}/{b.Id}: silhouette unchanged");
+                    if (o.HasCover && o.CoverAmount >= 0.3) ctx.True(coverPixels > 20, $"{id}/{b.Id}: cover visible ({coverPixels} px)");
+                    if (o.HasGrime && o.GrimeAmount >= 0.3 && (id == "quadruped" || id == "biped")) ctx.True(grimePixels > 10, $"{id}/{b.Id}: grime visible ({grimePixels} px)");
+                    ctx.True(pal.Colors.Count <= 255, $"{id}/{b.Id}: palette size");
+                }
+            }
+            // eyes are drawn after the overlay: a creature's eye colours survive heavy snow
+            var q = factory.Build(GenomeFactory.Sample(reg.GetFamily("quadruped"), 2024));
+            var qp = new CreaturePose(q.Anatomy.Skeleton);
+            var heavy = Biomes.Snow.Overlay.Scaled(2);
+            var snowy = RenderOverlay(q, qp, yaw, heavy, 2, out _);
+            var clean = RenderOverlay(q, qp, yaw, BiomeOverlay.None, 2, out _);
+            var eyeIdx = new HashSet<byte>();
+            for (int s2 = 0; s2 < 6; s2++) eyeIdx.Add(q.Palette.Index(PixelCreatures.Core.Anatomy.MaterialSlot.Eye, s2));
+            int eyesClean = clean.Indices.Count(eyeIdx.Contains), eyesSnow = snowy.Indices.Count(eyeIdx.Contains);
+            ctx.True(eyesSnow >= eyesClean * 0.9, $"eyes stay visible under snow ({eyesSnow}/{eyesClean})");
+            // swimmers carry no snow
+            var fish = factory.Build(GenomeFactory.Sample(reg.GetFamily("aquatic"), 5));
+            ctx.True(!Biomes.Snow.OverlayFor(fish).HasCover, "swimmers get no cover");
+        }
+
+        private static void ExportLayout(TestContext ctx, CreatureRegistry reg, CreatureFactory factory)
+        {
+            var m = factory.Build(GenomeFactory.Sample(reg.GetFamily("prop"), 11));
+            SpritesheetResult Run(bool compact, int maxPage, BiomeOverlay overlay)
+            {
+                var o = new SpritesheetOptions { Fps = 12, CompactFrames = compact, MaxPageSize = maxPage, Overlay = overlay };
+                o.Clips.Clear(); o.Clips.Add(ClipKind.Idle); o.Clips.Add(ClipKind.Action);
+                o.Directions.Clear(); o.Directions.Add(7); o.Directions.Add(2);
+                return SpritesheetExporter.Export(m, reg, o, "t");
+            }
+            var full = Run(false, 8192, BiomeOverlay.None);
+            var compact = Run(true, 8192, BiomeOverlay.None);
+            ctx.Equal(full.Pages.Count, compact.Pages.Count, "compact: page count");
+            for (int i = 0; i < full.Pages.Count; i++)
+                ctx.True(full.Pages[i].rgba.AsSpan().SequenceEqual(compact.Pages[i].rgba), $"compact: page {i} identical");
+            ctx.Equal(full.MetadataJson, compact.MetadataJson, "compact: metadata identical");
+            // narrow pages: clips wrap onto further rows, every frame still lies inside its page
+            int limit = full.FrameWidth * 5;
+            var wrapped = Run(true, limit, BiomeOverlay.None);
+            foreach (var (_, w, h) in wrapped.Pages) ctx.True(w <= limit, $"page width {w} <= {limit}");
+            foreach (var clip in wrapped.Clips)
+                foreach (var f in clip.Frames)
+                {
+                    var (_, pw, ph) = wrapped.Pages[f.Page];
+                    ctx.True(f.X + wrapped.FrameWidth <= pw && f.Y + wrapped.FrameHeight <= ph, $"{clip.Name}: frame inside page");
+                }
+            // the same frames, only rearranged: compare one frame's pixels in both layouts
+            var a = full.Clips[1].Frames[7];
+            var b = wrapped.Clips[1].Frames[7];
+            bool same = true;
+            for (int y = 0; y < full.FrameHeight && same; y++)
+                for (int x = 0; x < full.FrameWidth * 4; x++)
+                {
+                    var pa = full.Pages[a.Page]; var pb = wrapped.Pages[b.Page];
+                    if (pa.rgba[((a.Y + y) * pa.width) * 4 + a.X * 4 + x] != pb.rgba[((b.Y + y) * pb.width) * 4 + b.X * 4 + x]) { same = false; break; }
+                }
+            ctx.True(same, "wrapped frame pixels identical");
+            // overlay export: different colours, the biome is recorded
+            var snowy = Run(true, 8192, Biomes.Snow.OverlayFor(m));
+            ctx.True(!snowy.Pages[0].rgba.AsSpan().SequenceEqual(full.Pages[0].rgba), "overlay changes the sheet");
+            ctx.True(snowy.MetadataJson.Contains("\"overlay\""), "overlay recorded in the metadata");
+            ctx.True(!full.MetadataJson.Contains("\"overlay\"") && !full.MetadataJson.Contains("\"biome\""), "plain export metadata unchanged");
+        }
+    }
+
     public static class Golden
     {
         public static readonly uint[] Pcg42 = { 1210624746u, 4125136630u, 2074946571u, 3309376910u };
@@ -794,6 +988,86 @@ namespace PixelCreatures.Tests
             ["prop"] = 0x5b1ccd5f0e219b9eUL,
             ["prop:hd"] = 0xbfc9e0794ced2eb2UL,
             ["prop:walk"] = 0x441e784d8ef20b5bUL,
+            ["quadruped:biome:desert"] = 0x5ee66a341ff4ccf3UL,
+            ["quadruped:biome:desert:render"] = 0xcff9ae2099102e5bUL,
+            ["biped:biome:desert"] = 0x8ff78225e572643cUL,
+            ["reptile:biome:desert"] = 0xdf2f5a144c016c04UL,
+            ["arthropod:biome:desert"] = 0x064167f74b1e23aeUL,
+            ["winged:biome:desert"] = 0xb39098b659901858UL,
+            ["serpent:biome:desert"] = 0xa69b296bb9182e52UL,
+            ["aquatic:biome:desert"] = 0x5e36c5280707a894UL,
+            ["amorphous:biome:desert"] = 0xe3dcca2a2f2f825fUL,
+            ["mythical:biome:desert"] = 0x39dcf94873feb744UL,
+            ["monster:biome:desert"] = 0x309fe3f2d5b50430UL,
+            ["plantfolk:biome:desert"] = 0x2e6223b9db0c3949UL,
+            ["flora:biome:desert"] = 0x0d05d047109dfd48UL,
+            ["flora:biome:desert:render"] = 0x2db527e6268efc17UL,
+            ["prop:biome:desert"] = 0x75bc5b0e071542feUL,
+            ["prop:biome:desert:render"] = 0x93d656bae909ea06UL,
+            ["quadruped:biome:snow"] = 0xf95ac0d840ee9802UL,
+            ["quadruped:biome:snow:render"] = 0x15ead7cad8e2e685UL,
+            ["biped:biome:snow"] = 0x350e7f7798a0a857UL,
+            ["reptile:biome:snow"] = 0xe4b634fb619a71f6UL,
+            ["arthropod:biome:snow"] = 0xfa3ab8f42f8989f2UL,
+            ["winged:biome:snow"] = 0xd6024e253306036dUL,
+            ["serpent:biome:snow"] = 0x7ae1119987c76fe9UL,
+            ["aquatic:biome:snow"] = 0x5c64b5749e8eab95UL,
+            ["amorphous:biome:snow"] = 0xa5638acd5d2c9e24UL,
+            ["mythical:biome:snow"] = 0x5ebc2544825d191eUL,
+            ["monster:biome:snow"] = 0xf09e0f447a2177d2UL,
+            ["plantfolk:biome:snow"] = 0x7c38f112d931c19eUL,
+            ["flora:biome:snow"] = 0x5a5f0e667e79971aUL,
+            ["flora:biome:snow:render"] = 0xc5f772fb5b97da41UL,
+            ["prop:biome:snow"] = 0xc0e5302a4a1617c5UL,
+            ["prop:biome:snow:render"] = 0x7a7b82c5059f77cdUL,
+            ["quadruped:biome:jungle"] = 0x923441c4fe5e2cddUL,
+            ["quadruped:biome:jungle:render"] = 0xcb6ffc5326416b60UL,
+            ["biped:biome:jungle"] = 0xc715c4213155a424UL,
+            ["reptile:biome:jungle"] = 0x2e1453c4d2b74984UL,
+            ["arthropod:biome:jungle"] = 0x0e05d7a405464010UL,
+            ["winged:biome:jungle"] = 0x071e4cfcad2bd075UL,
+            ["serpent:biome:jungle"] = 0x825afec513e7ab32UL,
+            ["aquatic:biome:jungle"] = 0x5c83bd7ee2eba8e1UL,
+            ["amorphous:biome:jungle"] = 0xdbfdbbfc44fa188fUL,
+            ["mythical:biome:jungle"] = 0x0c0b06e0a813d037UL,
+            ["monster:biome:jungle"] = 0x07ba390675489e80UL,
+            ["plantfolk:biome:jungle"] = 0x8a5d421e9a8925e3UL,
+            ["flora:biome:jungle"] = 0x75b56adc4383e92aUL,
+            ["flora:biome:jungle:render"] = 0x9071fb4e623ab36cUL,
+            ["prop:biome:jungle"] = 0x909ba9052ec89a30UL,
+            ["prop:biome:jungle:render"] = 0xd8c78faca97fa4fcUL,
+            ["quadruped:biome:swamp"] = 0xc22a6038352c163fUL,
+            ["quadruped:biome:swamp:render"] = 0xc6f68576b7bba07fUL,
+            ["biped:biome:swamp"] = 0x1ed4c7916b1cabfeUL,
+            ["reptile:biome:swamp"] = 0x07f0ca1ab22dfab6UL,
+            ["arthropod:biome:swamp"] = 0x02855e97ec751548UL,
+            ["winged:biome:swamp"] = 0x0965534039e957aeUL,
+            ["serpent:biome:swamp"] = 0xabc4a770f5d1bd3aUL,
+            ["aquatic:biome:swamp"] = 0x3f86dd54ae770f33UL,
+            ["amorphous:biome:swamp"] = 0x35a660ff33c73d9dUL,
+            ["mythical:biome:swamp"] = 0x7c01b8865499583cUL,
+            ["monster:biome:swamp"] = 0x22872997553f5ec8UL,
+            ["plantfolk:biome:swamp"] = 0xc106a916c4fe41f0UL,
+            ["flora:biome:swamp"] = 0xd83d774defdc997aUL,
+            ["flora:biome:swamp:render"] = 0x94792bb7ffe6213cUL,
+            ["prop:biome:swamp"] = 0x34dd66aeb0c0a41dUL,
+            ["prop:biome:swamp:render"] = 0xb005c2c7de57a283UL,
+            ["quadruped:biome:volcanic"] = 0xe4eef1fd3782402dUL,
+            ["quadruped:biome:volcanic:render"] = 0xb96744bc700de830UL,
+            ["biped:biome:volcanic"] = 0xb71b7fc9cdf2ac7cUL,
+            ["reptile:biome:volcanic"] = 0x61df2f3b5a7de66fUL,
+            ["arthropod:biome:volcanic"] = 0xbf98141b7b662c25UL,
+            ["winged:biome:volcanic"] = 0xfee994ddb18f2f08UL,
+            ["serpent:biome:volcanic"] = 0x8590272001157de8UL,
+            ["aquatic:biome:volcanic"] = 0x26e9ac36cbb7340cUL,
+            ["amorphous:biome:volcanic"] = 0x5d632eda98784893UL,
+            ["mythical:biome:volcanic"] = 0x46cf076e4794646bUL,
+            ["monster:biome:volcanic"] = 0x63f273f06b0a9531UL,
+            ["plantfolk:biome:volcanic"] = 0x2bf0fb0c171021eeUL,
+            ["flora:biome:volcanic"] = 0x443a4feba7e1e2e0UL,
+            ["flora:biome:volcanic:render"] = 0xa17c6f7598c03ae6UL,
+            ["prop:biome:volcanic"] = 0x28f9802ac120b060UL,
+            ["prop:biome:volcanic:render"] = 0xb6d882689e1eff65UL,
         };
     }
 }

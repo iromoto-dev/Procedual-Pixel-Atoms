@@ -1,8 +1,10 @@
 // Procedural Pixel Creations for Unity - keeps reflection-discovered extensions alive under IL2CPP.
 //
-// Families, shape blocks and motion modules of extensions are found by reflection ([CreatureExtension]).
-// Managed code stripping cannot see that, so every assembly that references the core is preserved via
-// an additional link.xml generated at build time (Runtime/link.xml covers the package's own assemblies).
+// Extensions ([CreatureExtension] classes that register families, shape blocks, palette rules, biomes and
+// motion modules) are created by reflection. Managed code stripping cannot see that, so this processor
+// writes a link.xml at build time that preserves exactly those classes (not the rest of the game code) and
+// the package's own assemblies. Extensions in assemblies the editor does not load (player-only assemblies)
+// need a link.xml entry or [Preserve] of their own.
 
 #nullable enable
 
@@ -10,6 +12,8 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using PixelCreatures.Core;
+using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.UnityLinker;
@@ -18,22 +22,27 @@ namespace PixelCreatures.Unity.Editor
 {
     internal sealed class PixelCreaturesLinkerProcessor : IUnityLinkerProcessor
     {
+        private static readonly string[] PackageAssemblies = { "PixelCreatures.Core", "PixelCreatures.Plantfolk", "PixelCreatures.Unity" };
+
         public int callbackOrder => 0;
 
         public string GenerateAdditionalLinkXmlFile(BuildReport report, UnityLinkerBuildPipelineData data)
         {
-            string core = typeof(PixelCreatures.Core.CreatureRegistry).Assembly.GetName().Name ?? "PixelCreatures.Core";
-            // only assemblies that are part of this player build: naming an assembly the linker does not
-            // get as input fails the build with older linkers
             string input = data?.inputDirectory ?? string.Empty;
-            var names = AppDomain.CurrentDomain.GetAssemblies()
-                .Where(a => !a.IsDynamic && (a.GetName().Name == core || References(a, core)))
-                .Select(a => a.GetName().Name)
-                .Where(n => !string.IsNullOrEmpty(n) && InBuild(input, n!))
-                .Distinct()
-                .OrderBy(n => n, StringComparer.Ordinal);
             var sb = new StringBuilder("<linker>\n");
-            foreach (var n in names) sb.Append("  <assembly fullname=\"").Append(n).Append("\" preserve=\"all\"/>\n");
+            foreach (var asm in PackageAssemblies)
+                if (InBuild(input, asm)) sb.Append("  <assembly fullname=\"").Append(asm).Append("\" preserve=\"all\"/>\n");
+            var extensions = TypeCache.GetTypesWithAttribute<CreatureExtensionAttribute>()
+                .Where(t => !t.IsAbstract && t.Assembly.GetName().Name is string n && !PackageAssemblies.Contains(n) && InBuild(input, n))
+                .GroupBy(t => t.Assembly.GetName().Name!)
+                .OrderBy(g => g.Key, StringComparer.Ordinal);
+            foreach (var group in extensions)
+            {
+                sb.Append("  <assembly fullname=\"").Append(group.Key).Append("\">\n");
+                foreach (var t in group.OrderBy(t => t.FullName, StringComparer.Ordinal))
+                    sb.Append("    <type fullname=\"").Append(XmlEscape((t.FullName ?? t.Name).Replace('+', '/'))).Append("\" preserve=\"all\"/>\n");
+                sb.Append("  </assembly>\n");
+            }
             sb.Append("</linker>\n");
             string dir = Path.Combine("Temp", "PixelCreatures");
             Directory.CreateDirectory(dir);
@@ -42,6 +51,7 @@ namespace PixelCreatures.Unity.Editor
             return path;
         }
 
+        /// <summary>Only assemblies that are part of this player build (naming others fails the build with older linkers).</summary>
         private static bool InBuild(string inputDirectory, string name)
         {
             if (string.IsNullOrEmpty(inputDirectory) || !Directory.Exists(inputDirectory))
@@ -49,11 +59,7 @@ namespace PixelCreatures.Unity.Editor
             return File.Exists(Path.Combine(inputDirectory, name + ".dll"));
         }
 
-        private static bool References(System.Reflection.Assembly a, string core)
-        {
-            try { return a.GetReferencedAssemblies().Any(r => r.Name == core); }
-            catch (Exception) { return false; }
-        }
+        private static string XmlEscape(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
 
         // required by older Unity versions of the interface, unused by newer ones
         public void OnBeforeRun(BuildReport report, UnityLinkerBuildPipelineData data) { }

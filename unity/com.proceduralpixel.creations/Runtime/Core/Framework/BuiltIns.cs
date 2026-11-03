@@ -36,6 +36,7 @@ namespace PixelCreatures.Core
             r.RegisterFamily(new MonsterFamily());
             r.RegisterFamily(new FloraFamily());
             r.RegisterFamily(new PropFamily());
+            foreach (var b in PixelCreatures.Core.Biomes.All) r.RegisterBiome(b);
         }
     }
 }

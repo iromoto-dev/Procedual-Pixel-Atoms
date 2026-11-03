@@ -73,6 +73,67 @@ namespace PixelCreatures.Core.Palettes
 
         public byte Index(MaterialSlot slot, int shade) => Ramp[(int)slot, DMath.Clamp(shade, 0, Shade.Count - 1)];
 
+        /// <summary>Palette indices of the overlay cover material per shade level (null without overlay).</summary>
+        public byte[]? CoverRamp { get; private set; }
+        /// <summary>Palette indices of the overlay grime material per shade level (null without overlay).</summary>
+        public byte[]? GrimeRamp { get; private set; }
+        /// <summary>The overlay this palette was derived for (default for a creation's own palette).</summary>
+        public BiomeOverlay Overlay { get; private set; }
+        /// <summary>True for palettes made by WithOverlay: they carry the ramps the renderer needs for the overlay.</summary>
+        public bool HasOverlay { get; private set; }
+
+        /// <summary>
+        /// A copy with the overlay's cover and grime ramps added (outline = the creation's outline) and every
+        /// colour graded towards the overlay grade. Indices of existing colours do not change.
+        /// </summary>
+        public CreaturePalette WithOverlay(in BiomeOverlay overlay)
+        {
+            var p = new CreaturePalette();
+            p._colors.Clear();
+            p._names.Clear();
+            p._colors.AddRange(_colors);
+            p._names.AddRange(_names);
+            Array.Copy(Ramp, p.Ramp, Ramp.Length);
+            p.FlashColor = FlashColor;
+            p.WaterTint = WaterTint;
+            p.ColorKey = StableHash.Combine(ColorKey, overlay.Key);
+            p.Overlay = overlay;
+            p.HasOverlay = true;
+            byte outline = Index(MaterialSlot.Primary, Shade.Outline);
+            if (overlay.HasCover) p.CoverRamp = p.AddRamp(overlay.Cover!, outline, "cover");
+            if (overlay.HasGrime) p.GrimeRamp = p.AddRamp(overlay.Grime!, outline, "grime");
+            if (overlay.GradeAmount > 1e-6)
+            {
+                double t = DMath.Clamp(overlay.GradeAmount, 0, 0.5);
+                for (int i = FirstColorIndex; i < p._colors.Count; i++)
+                {
+                    var c = p._colors[i];
+                    var g = Rgba.Lerp(c, overlay.Grade.WithAlpha(c.A), t);
+                    p._colors[i] = g;
+                }
+                p.FlashColor = Rgba.Lerp(FlashColor, overlay.Grade.WithAlpha(FlashColor.A), t * 0.5);
+            }
+            return p;
+        }
+
+        private byte[] AddRamp(OverlayMaterial m, byte outline, string name)
+        {
+            var r = new byte[Shade.Count];
+            r[Shade.Outline] = outline;
+            for (int level = Shade.Deep; level <= Shade.Highlight; level++)
+                r[level] = (byte)AppendDistinct(m.Shade(level), $"{name} {m.Id} {level}");
+            return r;
+        }
+
+        /// <summary>Adds a colour even when an equal one exists (grading must not merge overlay and body colours).</summary>
+        private int AppendDistinct(Rgba c, string name)
+        {
+            _colors.Add(c);
+            _names.Add(name);
+            if (_colors.Count > 255) throw new InvalidOperationException("Palette overflow.");
+            return _colors.Count - 1;
+        }
+
         public Rgba Color(MaterialSlot slot, int shade) => _colors[Index(slot, shade)];
 
         /// <summary>RGBA lookup table (index to packed RGBA bytes), optionally flashed.</summary>

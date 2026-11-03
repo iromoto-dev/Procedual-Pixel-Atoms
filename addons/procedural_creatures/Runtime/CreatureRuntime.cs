@@ -61,6 +61,16 @@ namespace PixelCreatures.Runtime
 
         public static CreatureGenome Sample(string familyId, ulong seed) => GenomeFactory.Sample(Registry.GetFamily(familyId), seed);
 
+        /// <summary>A genome sampled in a biome (null, empty or "temperate" = the family's own distribution).</summary>
+        public static CreatureGenome Sample(string familyId, ulong seed, string? biomeId) =>
+            GenomeFactory.Sample(Registry.GetFamily(familyId), seed, GetBiome(biomeId));
+
+        /// <summary>Registered biomes (temperate, desert, snow, jungle, swamp, volcanic and extension biomes).</summary>
+        public static IReadOnlyList<Biome> Biomes => Registry.Biomes;
+
+        /// <summary>The biome with this id; unknown ids give the neutral temperate biome.</summary>
+        public static Biome GetBiome(string? id) => Registry.GetBiome(id);
+
         /// <summary>Builds a model synchronously (cached).</summary>
         public static CreatureModel Build(CreatureGenome genome) => Factory.Build(genome);
 

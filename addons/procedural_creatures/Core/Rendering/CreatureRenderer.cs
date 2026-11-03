@@ -116,6 +116,12 @@ namespace PixelCreatures.Core.Rendering
         private sbyte[] _levelTmp = Array.Empty<sbyte>();
         private byte[] _matTmp = Array.Empty<byte>();
         private byte[] _shadowMask = Array.Empty<byte>();
+        // environment overlay (allocated on first use)
+        private float[] _ovNoise = Array.Empty<float>();
+        private byte[] _ovMask = Array.Empty<byte>();
+        private byte[] _ovTmp = Array.Empty<byte>();
+        private bool _overlay;
+        private Vec3 _upView;
         // scratch counters of the shading cleanup (arrays instead of stackalloc spans: portable to every Unity runtime)
         private readonly int[] _shadeCounts = new int[8];
         private readonly int[] _matCounts = new int[(int)MaterialSlot.Count];
@@ -185,6 +191,11 @@ namespace PixelCreatures.Core.Rendering
             _halfView = (_lightView + Vec3.UnitZ).Normalized();
             _lateralView = _creatureToView.Mul(Vec3.UnitZ);
             _forwardView = _creatureToView.Mul(Vec3.UnitX);
+            _upView = wv.Mul(Vec3.UnitY);
+            // the overlay needs the palette made for it (CreatureModel.PaletteFor); wetness alone uses the body ramps
+            var overlay = view.Overlay;
+            _overlay = overlay.IsActive && (palette.HasOverlay || !overlay.NeedsPalette);
+            if (_overlay) EnsureOverlayBuffers(_w * _h);
 
             _patternScale = anatomy.Metrics.PatternScale * _s;
             _textureScale = anatomy.Metrics.PatternScale * DMath.Pow(_s, 0.6);
@@ -205,6 +216,7 @@ namespace PixelCreatures.Core.Rendering
             Mark(5);
             if (Options.CollectShadeStats) CountShades(ref stats);
             Compose(anatomy, palette, frame);
+            if (_overlay) ApplyOverlay(anatomy, palette, frame, overlay);
             Mark(6);
             if (Options.Features) DrawFeatures(anatomy, palette, pose, frame);
             Mark(7);
@@ -1025,6 +1037,13 @@ namespace PixelCreatures.Core.Rendering
                         if ((p.Flags & PrimFlags.NoPattern) == 0) slot = surface.Evaluate(sp, slot, ref bias, _patternScale);
                     }
 
+                    if (_overlay)
+                    {
+                        // part-attached noise: overlay edges stay glued to the body while it moves
+                        var osp = hasSurface ? sp : SurfaceAt(ref p, vx, vy, _z[i] - grp.DepthBias * _s);
+                        _ovNoise[i] = (float)OverlayNoise(osp, _prim[i]);
+                    }
+
                     var style = surface.StyleOf(slot);
                     if ((p.Flags & PrimFlags.Faceted) != 0 || style.Faceted) n = FacetNormal(ref p, n);
                     int level;
@@ -1528,6 +1547,148 @@ namespace PixelCreatures.Core.Rendering
         // outline pixel lies above or left of the shape (towards the light)
         private bool k0Up(int x, int y) => y + 1 < _h && (_pflags[(y + 1) * _w + x] & FlagCovered) != 0 && (y == 0 || (_pflags[(y - 1) * _w + x] & FlagCovered) == 0);
         private bool k0Left(int x, int y) => x + 1 < _w && (_pflags[y * _w + x + 1] & FlagCovered) != 0 && (x == 0 || (_pflags[y * _w + x - 1] & FlagCovered) == 0);
+
+        // ------------------------------------------------------------------ environment overlay
+
+        private void EnsureOverlayBuffers(int n)
+        {
+            if (_ovNoise.Length >= n) return;
+            _ovNoise = new float[n];
+            _ovMask = new byte[n];
+            _ovTmp = new byte[n];
+        }
+
+        /// <summary>Smooth value noise (two octaves, 0..1) over the part's surface coordinates, cell ~2.4 world px.</summary>
+        private double OverlayNoise(in SurfacePoint sp, int prim)
+        {
+            double cell = 2.4 * _s;
+            ulong seed = 0x51ED27A5UL + (ulong)(prim + 1) * 0x9E3779B97F4A7C15UL;
+            double n = ValueNoise(seed, sp.U / cell, sp.V / cell) * 0.7 + ValueNoise(seed ^ 0xA5A5UL, sp.U / (cell * 0.45), sp.V / (cell * 0.45)) * 0.3;
+            return n;
+        }
+
+        private static double ValueNoise(ulong seed, double u, double v)
+        {
+            double fu0 = Math.Floor(u), fv0 = Math.Floor(v);
+            int iu = (int)fu0, iv = (int)fv0;
+            double fu = u - fu0, fv = v - fv0;
+            fu = fu * fu * (3 - 2 * fu);
+            fv = fv * fv * (3 - 2 * fv);
+            double a = StableHash.Hash01(seed, iu, iv), b = StableHash.Hash01(seed, iu + 1, iv);
+            double c = StableHash.Hash01(seed, iu, iv + 1), d = StableHash.Hash01(seed, iu + 1, iv + 1);
+            double top = a + (b - a) * fu, bottom = c + (d - c) * fu;
+            return top + (bottom - top) * fv;
+        }
+
+        private const byte OvNone = 0, OvCover = 1, OvGrime = 2, OvExcluded = 3;
+
+        /// <summary>
+        /// Environment overlay: cover (snow, sand, moss, ash) on upward facing surfaces, grime (mud, dust, soot)
+        /// near the ground, wet glints. Runs after composition (outlines and contours keep their colours) and
+        /// before the features, so eyes are never covered. Covered pixels use the matte shading of their
+        /// normal (limited by the body shading, which carries contact shadows).
+        /// </summary>
+        private void ApplyOverlay(CreatureAnatomy anatomy, CreaturePalette palette, PixelFrame frame, in BiomeOverlay o)
+        {
+            var output = frame.Indices;
+            WorkRegion(out int rx0, out int ry0, out int rx1, out int ry1);
+            bool cover = o.HasCover && palette.CoverRamp != null;
+            bool grime = o.HasGrime && palette.GrimeRamp != null;
+            double coverT = 1.0 - 1.15 * o.CoverAmount;
+            double patch = 0.25 + 0.75 * DMath.Clamp(o.CoverPatchiness, 0, 1);
+            double grimeH = o.GrimeAmount * Math.Max(2.0, 0.42 * anatomy.Metrics.TopHeight);
+
+            // 1. classify
+            for (int y = ry0; y <= ry1; y++)
+            {
+                double vy = _oy - (y + 0.5);
+                for (int x = rx0; x <= rx1; x++)
+                {
+                    int i = y * _w + x;
+                    _ovMask[i] = OvExcluded;
+                    byte f = _pflags[i];
+                    if ((f & FlagCovered) == 0 || (f & (FlagContour | FlagFeature | FlagBack)) != 0) continue;
+                    var slot = (MaterialSlot)_mat[i];
+                    if (slot == MaterialSlot.Eye || slot == MaterialSlot.Mouth || slot == MaterialSlot.Teeth || slot == MaterialSlot.Glow) continue;
+                    if ((_pp[_prim[i]].Flags & PrimFlags.Emissive) != 0) continue;
+                    _ovMask[i] = OvNone;
+                    double noise = _ovNoise[i];
+                    if (cover)
+                    {
+                        double up = _nx[i] * _upView.X + _ny[i] * _upView.Y + _nz[i] * _upView.Z;
+                        // snow piles up along the top of the silhouette
+                        bool topEdge = y == 0 || (_pflags[i - _w] & FlagCovered) == 0;
+                        double score = up + (noise - 0.5) * patch + (topEdge ? 0.12 : 0.0);
+                        if (score > coverT) { _ovMask[i] = OvCover; continue; }
+                    }
+                    if (grime)
+                    {
+                        double vx = x + 0.5 - _ox;
+                        double height = (vx * _upView.X + vy * _upView.Y + _z[i] * _upView.Z) / _s;
+                        if (height < grimeH * (0.7 + 0.6 * noise)) _ovMask[i] = OvGrime;
+                    }
+                }
+            }
+
+            // 2. clean pixel clusters: drop lone overlay pixels, fill single holes
+            for (int y = ry0; y <= ry1; y++)
+            {
+                for (int x = rx0; x <= rx1; x++)
+                {
+                    int i = y * _w + x;
+                    byte m = _ovMask[i];
+                    _ovTmp[i] = m;
+                    if (m == OvExcluded) continue;
+                    int same = 0, covers = 0, grimes = 0;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int nx = x + (k == 0 ? -1 : k == 1 ? 1 : 0);
+                        int ny = y + (k == 2 ? -1 : k == 3 ? 1 : 0);
+                        if (nx < rx0 || ny < ry0 || nx > rx1 || ny > ry1) continue;
+                        byte mj = _ovMask[ny * _w + nx];
+                        if (mj == m) same++;
+                        if (mj == OvCover) covers++;
+                        else if (mj == OvGrime) grimes++;
+                    }
+                    if (m != OvNone && same == 0) _ovTmp[i] = OvNone;
+                    else if (m == OvNone && covers >= 3) _ovTmp[i] = OvCover;
+                    else if (m == OvNone && grimes >= 3) _ovTmp[i] = OvGrime;
+                }
+            }
+
+            // 3. colours
+            bool sparkle = cover && o.Cover!.Sparkle;
+            double wetT = 0.955 - 0.05 * DMath.Clamp(o.Wetness, 0, 1);
+            bool wet = o.Wetness > 1e-6;
+            for (int y = ry0; y <= ry1; y++)
+            {
+                for (int x = rx0; x <= rx1; x++)
+                {
+                    int i = y * _w + x;
+                    byte m = _ovTmp[i];
+                    if (m == OvExcluded) continue;
+                    var n = new Vec3(_nx[i], _ny[i], _nz[i]);
+                    double ndh = Vec3.Dot(n, _halfView);
+                    if (m == OvCover)
+                    {
+                        int level = MaterialStyles.Matte.Level(Vec3.Dot(n, _lightView), ndh);
+                        level = Math.Min(level, _level[i] + 1);
+                        if (sparkle && ndh > 0.975) level = Shade.Highlight;
+                        output[i] = palette.CoverRamp![DMath.Clamp(level, Shade.Deep, Shade.Highlight)];
+                    }
+                    else if (m == OvGrime)
+                    {
+                        int level = DMath.Clamp(_level[i], Shade.Deep, Shade.Light);
+                        if (wet && ndh > wetT && level >= Shade.Base) level = Shade.Highlight;
+                        output[i] = palette.GrimeRamp![level];
+                    }
+                    else if (wet && ndh > wetT && _level[i] >= Shade.Base)
+                    {
+                        output[i] = palette.Index((MaterialSlot)_mat[i], Shade.Highlight);
+                    }
+                }
+            }
+        }
 
         // ------------------------------------------------------------------ features (eyes, nostrils)
 

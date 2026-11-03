@@ -2,12 +2,13 @@
 //
 // Add this component to an empty GameObject in an empty scene and press Play. It sets up an
 // orthographic camera, spawns a gallery of creations of every category (creatures, mythical
-// creatures, monsters, trees & flora, props), lets the animals wander around and gives you one
-// creature to steer:
+// creatures, monsters, trees & flora, props) in a biome, lets the animals wander around and gives you
+// one creature to steer:
 //   WASD / arrow keys / left stick   move (hold Shift or the south button to run)
 //   Space / east button              action (attack, howl, ...)
 //   R / north button                 rest / wake up
 //   N                                new random creature for the player
+//   1 .. 6                           biome: temperate, desert, snow, jungle, swamp, volcanic (rebuilds the gallery)
 
 #nullable enable
 
@@ -34,6 +35,8 @@ namespace PixelCreatures.Samples
         public float pixelsPerUnit = 32f;
         public string playerFamily = "quadruped";
         public string playerSeed = "hero";
+        [Tooltip("temperate, desert, snow, jungle, swamp or volcanic.")]
+        public string biome = "temperate";
         public bool wander = true;
 
         private readonly List<PixelCreatureActor> _crowd = new List<PixelCreatureActor>();
@@ -47,6 +50,17 @@ namespace PixelCreatures.Samples
             PixelCreatureRuntime.DefaultDensity = pixelDensity;
             PixelCreatureRuntime.DefaultPixelsPerUnit = pixelsPerUnit;
             SetupCamera();
+            BuildScene();
+        }
+
+        private void BuildScene()
+        {
+            foreach (var a in _crowd) if (a != null) Destroy(a.gameObject);
+            _crowd.Clear();
+            _nextWander.Clear();
+            if (_player != null) Destroy(_player.gameObject);
+            var b = PixelCreatureRuntime.GetBiome(biome);
+            if (_camera != null) _camera.backgroundColor = PixelCreatureRuntime.ToColor(b.Ground);
 
             var ids = new List<string>();
             if (families.Length > 0) ids.AddRange(families);
@@ -77,6 +91,7 @@ namespace PixelCreatures.Samples
             var actor = go.AddComponent<PixelCreatureActor>();
             actor.FamilyId = familyId;
             actor.Seed = seed;
+            actor.Biome = biome;
             actor.SortByGroundDepth = true;
             var w = PixelCreatureRuntime.GroundToWorld(ground, pixelsPerUnit);
             go.transform.position = new Vector3(w.x, w.y, 0);
@@ -97,14 +112,21 @@ namespace PixelCreatures.Samples
             // about 360 ground pixels high: chunky pixels on every screen
             _camera.orthographicSize = 180f / pixelsPerUnit;
             _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = new Color(0.32f, 0.45f, 0.30f);
+            _camera.backgroundColor = PixelCreatureRuntime.ToColor(PixelCreatureRuntime.GetBiome(biome).Ground);
             _camera.transform.position = new Vector3(0, 0, -10);
         }
 
         private void Update()
         {
             if (_player == null) return;
-            ReadInput(out var move, out bool run, out bool action, out bool rest, out bool reroll);
+            ReadInput(out var move, out bool run, out bool action, out bool rest, out bool reroll, out int biomeKey);
+            var biomes = PixelCreatureRuntime.Biomes;
+            if (biomeKey >= 0 && biomeKey < biomes.Count && biomes[biomeKey].Id != biome)
+            {
+                biome = biomes[biomeKey].Id;
+                BuildScene();
+                return;
+            }
             float speed = 0;
             if (_player.Model != null) speed = (float)(run ? _player.Model.Motion.RunSpeed : _player.Model.Motion.WalkSpeed);
             _player.MoveVelocity = move.sqrMagnitude > 0.01f ? move.normalized * speed : Vector2.zero;
@@ -137,10 +159,11 @@ namespace PixelCreatures.Samples
             _camera.transform.position = Vector3.Lerp(c, new Vector3(p.x, p.y, c.z), 1f - Mathf.Exp(-6f * Time.deltaTime));
         }
 
-        private static void ReadInput(out Vector2 move, out bool run, out bool action, out bool rest, out bool reroll)
+        private static void ReadInput(out Vector2 move, out bool run, out bool action, out bool rest, out bool reroll, out int biomeKey)
         {
             move = Vector2.zero;
             run = action = rest = reroll = false;
+            biomeKey = -1;
 #if ENABLE_INPUT_SYSTEM
             var k = Keyboard.current;
             if (k != null)
@@ -153,6 +176,8 @@ namespace PixelCreatures.Samples
                 action |= k.spaceKey.wasPressedThisFrame;
                 rest |= k.rKey.wasPressedThisFrame;
                 reroll |= k.nKey.wasPressedThisFrame;
+                var digits = new[] { k.digit1Key, k.digit2Key, k.digit3Key, k.digit4Key, k.digit5Key, k.digit6Key };
+                for (int i = 0; i < digits.Length; i++) if (digits[i].wasPressedThisFrame) biomeKey = i;
             }
             var g = Gamepad.current;
             if (g != null)
@@ -170,6 +195,7 @@ namespace PixelCreatures.Samples
             action = Input.GetKeyDown(KeyCode.Space);
             rest = Input.GetKeyDown(KeyCode.R);
             reroll = Input.GetKeyDown(KeyCode.N);
+            for (int i = 0; i < 6; i++) if (Input.GetKeyDown(KeyCode.Alpha1 + i)) biomeKey = i;
 #endif
         }
     }

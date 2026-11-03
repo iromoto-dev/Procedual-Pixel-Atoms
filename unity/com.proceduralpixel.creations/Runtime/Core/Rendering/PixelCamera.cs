@@ -88,6 +88,11 @@ namespace PixelCreatures.Core
         /// be sized with <see cref="PixelCreatures.Core.Anatomy.CanvasSpec.Scaled"/>. Values below 1 are treated as 1.
         /// </summary>
         public double Density;
+        /// <summary>
+        /// Environment look (snow, sand, moss, mud, wet glints, colour grade). Default = none. Render with the
+        /// palette from CreatureModel.PaletteFor(Overlay) and build the colour lookup from the same palette.
+        /// </summary>
+        public BiomeOverlay Overlay;
 
         /// <summary>Effective density (at least 1).</summary>
         public double PixelDensity => Density > 1 ? Density : 1.0;

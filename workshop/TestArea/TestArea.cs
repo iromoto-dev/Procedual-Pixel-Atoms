@@ -52,6 +52,8 @@ namespace PixelCreatures.Workshop
         private CreatureActor? _player;
         private readonly List<Wanderer> _npcs = new List<Wanderer>();
         private int _targetPopulation = 10;
+        private Biome _biome = Biomes.Temperate;
+        private OptionButton _biomePicker = null!;
         private Label _hud = null!;
         private Label _perf = null!;
         private Label _status = null!;
@@ -170,14 +172,17 @@ namespace PixelCreatures.Workshop
                 else if (a.StartsWith("--map=") && int.TryParse(a.Substring(6), out int m)) _mapIndex = Math.Clamp(m, 0, MapSize.All.Length - 1);
                 else if (a.StartsWith("--map-seed=") && ulong.TryParse(a.Substring(11), out ulong s)) _mapSeed = s;
                 else if (a.StartsWith("--zoom=") && int.TryParse(a.Substring(7), out int z)) _zoom = Math.Clamp(z, 1, 8);
+                else if (a.StartsWith("--biome=")) TestAreaLauncher.PendingBiome = a.Substring(8);
             }
+            _biome = CreatureRuntime.GetBiome(TestAreaLauncher.PendingBiome);
+            EnvironmentArt.Theme = GroundTheme.For(_biome);
             BuildOverlay();
             _minimap = new TestAreaMinimap { Area = this };
             AddChild(_minimap);
             var size = MapSize.All[_mapIndex];
             ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, _mapSeed));
 
-            SpawnPlayer(TestAreaLauncher.PendingGenome ?? CreatureRuntime.Sample("quadruped", 7));
+            SpawnPlayer(TestAreaLauncher.PendingGenome ?? CreatureRuntime.Sample("quadruped", 7, _biome.Id));
             SetPopulation(population);
             Resized += Relayout;
             Relayout();
@@ -224,6 +229,18 @@ namespace PixelCreatures.Workshop
             }
             v.AddChild(populationRow);
             populationRow.AddChild(UiKit.Button("Reroll", RerollPopulation, "Generate a fresh population in this landscape (G)"));
+
+            _biomePicker = new OptionButton { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(150, 0),
+                TooltipText = "Biome of the landscape and the creatures (B cycles through the biomes)" };
+            var biomes = CreatureRuntime.Biomes;
+            for (int i = 0; i < biomes.Count; i++)
+            {
+                _biomePicker.AddItem(biomes[i].DisplayName);
+                _biomePicker.SetItemTooltip(i, biomes[i].Description);
+            }
+            _biomePicker.Selected = Math.Max(0, biomes.ToList().FindIndex(b => b.Id == _biome.Id));
+            _biomePicker.ItemSelected += i => SetBiome(CreatureRuntime.Biomes[(int)i]);
+            v.AddChild(UiKit.Row(6, Caption("Biome"), _biomePicker));
 
             _mapValue = UiKit.Label("", 13);
             _mapValue.CustomMinimumSize = new Vector2(150, 0);
@@ -474,6 +491,7 @@ namespace PixelCreatures.Workshop
         {
             var actor = GD.Load<PackedScene>("res://addons/procedural_creatures/Runtime/CreatureActor.tscn").Instantiate<CreatureActor>();
             actor.FamilyId = string.Empty;
+            actor.Biome = _biome.Id;
             actor.AnimationFps = fps;
             actor.CullOffscreen = true;
             return actor;
@@ -518,7 +536,7 @@ namespace PixelCreatures.Workshop
             // wanderers come from the moving categories; trees and props are scenery of the map itself
             var families = CreatureRuntime.Registry.Families.Where(f => CreatureFamilies.CategoryOf(f) is CreationCategory.Creature or CreationCategory.Mythical or CreationCategory.Monster).ToList();
             int k = _nextNpc++;
-            CreatureGenome g = GenomeFactory.Sample(families[k % families.Count], (ulong)(5000 + k * 7919));
+            CreatureGenome g = GenomeFactory.Sample(families[k % families.Count], (ulong)(5000 + k * 7919), _biome);
             var model = CreatureRuntime.Build(g);
             var rig = model.Anatomy.Rig;
             var actor = NewActor(12);
@@ -692,6 +710,13 @@ namespace PixelCreatures.Workshop
                 case Key.M: ShowMinimap(!_minimap.Visible); break;
                 case Key.N: NewMap(); break;
                 case Key.G: RerollPopulation(); break;
+                case Key.B:
+                {
+                    var all = CreatureRuntime.Biomes;
+                    int next = (all.ToList().FindIndex(b => b.Id == _biome.Id) + 1) % all.Count;
+                    SetBiome(all[next]);
+                    break;
+                }
                 case Key.Pageup: SetMapSize(_mapIndex + 1); break;
                 case Key.Pagedown: SetMapSize(_mapIndex - 1); break;
                 case Key.Equal: case Key.Plus: case Key.KpAdd: SetPopulation((_targetPopulation / 10 + 1) * 10); break;
@@ -852,13 +877,35 @@ namespace PixelCreatures.Workshop
 
         public void ShowOverlay(bool show) => _overlay.Visible = show;
 
+        /// <summary>
+        /// Switches the biome: the landscape is generated again in the biome's colours, every creature gets the
+        /// biome look and the population is sampled again in the biome (the player keeps its creature).
+        /// </summary>
+        public void SetBiome(Biome biome)
+        {
+            if (biome == _biome) return;
+            _biome = biome;
+            TestAreaLauncher.PendingBiome = biome.Id;
+            // the map generator reads the theme: cancel a running generation before switching it
+            _mapCancel?.Cancel();
+            _mapCancel = null;
+            _mapTask = null;
+            EnvironmentArt.Theme = GroundTheme.For(biome);
+            int bi = CreatureRuntime.Biomes.ToList().FindIndex(b => b.Id == biome.Id);
+            if (_biomePicker != null && bi >= 0 && _biomePicker.Selected != bi) _biomePicker.Selected = bi;
+            if (_player != null) _player.Biome = biome.Id;
+            foreach (var w in _npcs) w.Actor.QueueFree();
+            _npcs.Clear();
+            RequestMap(false);
+        }
+
         public void RerollPopulation()
         {
             foreach (var w in _npcs) w.Actor.QueueFree();
             _npcs.Clear();
             if (_player != null)
             {
-                _player.SetGenome(CreatureRuntime.Sample(_player.Genome!.FamilyId, (ulong)(90000 + _nextNpc++)), async: false);
+                _player.SetGenome(CreatureRuntime.Sample(_player.Genome!.FamilyId, (ulong)(90000 + _nextNpc++), _biome.Id), async: false);
                 BindHabitat(_player);
                 _player.Teleport(FindSpot(IsAquatic(_player), false, new Rng((ulong)_nextNpc), radius: HabitatRadius(_player)));
             }
@@ -896,7 +943,7 @@ namespace PixelCreatures.Workshop
             string pname = _player?.Genome?.Name ?? "-";
             int visible = VisibleCreatureCount;
             _hud.Text = "WASD/arrow keys walk, Shift run, Space action, R rest, H hit, Tab/left click take control of a creature\n" +
-                        "Mouse wheel zoom, right-drag camera, F follow, M minimap, PgUp/PgDn map size, N new map, G reroll, F1 overlay\n" +
+                        "Mouse wheel zoom, right-drag camera, F follow, M minimap, PgUp/PgDn map size, N new map, G reroll, B biome, F1 overlay\n" +
                         $"Player: {pname} ({_player?.State})   Creatures: {CreatureCount}, {visible} visible";
             if (_frameTimes.Count > 10)
             {

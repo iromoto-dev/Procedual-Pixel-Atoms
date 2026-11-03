@@ -98,6 +98,9 @@ namespace PixelCreatures.Workshop
         public event Action<int>? HoverChanged;
 
         private OverviewCells _cells = null!;
+
+        /// <summary>Redraws the cell grounds (after the biome theme changed).</summary>
+        public void RedrawCells() => _cells?.QueueRedraw();
         private Control _overlay = null!;
         private bool _dragging;
         private float _gridWidth;

@@ -31,7 +31,7 @@ namespace PixelCreatures.Workshop
             var controls = new HBoxContainer();
             controls.AddThemeConstantOverride("separation", 6);
             controls.AddChild(UiKit.Label("Partner B:", 13));
-            _source = new OptionButton { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(240, 0), TooltipText = "Second parent (must have the same body-plan family)" };
+            _source = new OptionButton { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(200, 0), FitToLongestItem = false, ClipText = true, TooltipText = "Second parent (must have the same body-plan family)" };
             _source.ItemSelected += _ => PickPartnerFromSource();
             controls.AddChild(_source);
             controls.AddChild(UiKit.Button("Another partner", () => { _partnerSeed++; _source.Selected = 0; PickPartnerFromSource(); }, "Generate a new random partner of the same family"));

@@ -1,13 +1,17 @@
 {
   "name": "com.proceduralpixel.creations",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Procedural Pixel Creations",
-  "description": "Procedural pixel-art creatures, mythical creatures, monsters, trees and flora, and props: generated, animated and rasterized in code at HD pixel density. Live PixelCreatureActor components, a Creation Studio editor window with gene editing, presets, sprite sheet export and baking to sprites, animation clips and animator controllers.",
+  "description": "Procedural pixel-art creatures, mythical creatures, monsters, trees and flora, and props: generated, animated and rasterized in code at HD pixel density, with biome variants (desert, snow, jungle, swamp, volcanic). Live PixelCreatureActor components, a Creation Studio editor window with gene editing, presets, sprite sheet export and baking to sprites, animation clips and animator controllers.",
   "unity": "2021.3",
   "documentationUrl": "https://github.com/iromoto-dev/Procedual-Pixel-Atoms/blob/main/unity/com.proceduralpixel.creations/README.md",
   "license": "MIT",
   "author": {
     "name": "idlerunner00"
+  },
+  "dependencies": {
+    "com.unity.modules.animation": "1.0.0",
+    "com.unity.modules.imgui": "1.0.0"
   },
   "keywords": [
     "procedural",
@@ -18,7 +22,8 @@
     "trees",
     "props",
     "generator",
-    "animation"
+    "animation",
+    "biomes"
   ],
   "samples": [
     {

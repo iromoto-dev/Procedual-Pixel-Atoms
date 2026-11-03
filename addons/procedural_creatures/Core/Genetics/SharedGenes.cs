@@ -89,6 +89,19 @@ namespace PixelCreatures.Core.Genetics
         public double CountershadeMin = 0.2, CountershadeMax = 0.8;
         public double EnergyMin = 0.2, EnergyMax = 0.9;
         public double WeightMin = 0.1, WeightMax = 0.9;
+
+        /// <summary>Deep copy (biomes adjust the hints of a family without touching the family's own instance).</summary>
+        public FamilyStyleHints Clone()
+        {
+            var c = (FamilyStyleHints)MemberwiseClone();
+            c.Coats = (CoatPrior[])Coats.Clone();
+            c.Hues = ((double hue, double spread, double weight)[])Hues.Clone();
+            c.Materials = new Dictionary<string, double>(Materials);
+            c.Patterns = new Dictionary<string, double>(Patterns);
+            c.Accents = new Dictionary<string, double>(Accents);
+            c.Schemes = new Dictionary<string, double>(Schemes);
+            return c;
+        }
     }
 
     public static class SharedGenes

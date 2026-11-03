@@ -1,7 +1,8 @@
 # Procedural Pixel Creations for Unity
 
 Procedural pixel-art **creatures, mythical creatures, monsters, trees & flora and props**, generated,
-animated and rasterized in code at HD pixel density. Every creation comes from a seed (or a
+animated and rasterized in code at HD pixel density, in six **biomes** (temperate, desert, snow,
+jungle, swamp, volcanic). Every creation comes from a seed (or a
 `ppc.creature` preset), has a skeleton, walks, runs, rests, attacks and reacts to hits, and is
 drawn into a point-filtered sprite in eight directions.
 
@@ -37,7 +38,8 @@ Append `#<branch or tag>` to the URL to pin a version. No other packages are req
   native assets.
 - **Samples** (Package Manager > Procedural Pixel Creations > Samples): *Demo scene setup* (add
   `PixelCreationsDemo` to an empty GameObject and press Play: a gallery of every category and a
-  creature you steer with WASD / arrows / a gamepad) and *Example presets* (92 presets).
+  creature you steer with WASD / arrows / a gamepad; keys 1-6 switch the biome) and *Example presets*
+  (92 presets).
 
 ## Families
 
@@ -51,6 +53,24 @@ Append `#<branch or tag>` to the URL to pin a version. No other packages are req
 
 Trees, plants and props are stationary: they sway in the wind, rustle when hit and open, light up
 or close on *Action* / *Rest*.
+
+## Biomes
+
+```csharp
+actor.Biome = "snow";          // temperate, desert, snow, jungle, swamp, volcanic
+actor.BiomeIntensity = 1f;     // 0 = no look, 2 = heavy
+actor.Reroll("42");            // new creations are sampled for the biome (snowy conifers, yetis, white coats ...)
+
+var g = PixelCreatureRuntime.Sample("flora", 7, "desert");   // cacti, palms, dead trees ...
+Color ground = PixelCreatureRuntime.ToColor(PixelCreatureRuntime.GetBiome("desert").Ground);
+```
+
+A biome works on two layers: it adapts *sampling* (archetypes, coat colours, patterns, genes; the
+result is an ordinary genome, presets keep their genes) and the *look* of every rendered creation
+(snow, sand, moss or ash on top, mud or dust near the ground, wet glints, a colour grade). The look is
+a render setting: set `actor.Biome` on a preset-based actor, or `OverlayOverride` for a look of your
+own. The Creation Studio has a biome picker and a *Biome look* slider; exports and bakes include the
+look and record the biome. The temperate biome changes nothing.
 
 ## Live actors
 
@@ -77,7 +97,8 @@ actor.FaceDirection(6);                  // 0 east, 2 north, 4 west, 6 south
   its transform.
 - **Pixel density.** Density 2 doubles the sprite resolution *and* switches on the high density
   anatomy (claws, scales, feathers, bark, rivets, ...). The sprite's pixels per unit are
-  `PixelsPerUnit * density`, so the world size does not change with the density.
+  `PixelsPerUnit * density`, so the world size does not change with the density. Very large creations
+  are rendered at a lower density when needed (`EffectiveDensity`) so a sprite never exceeds 1024 px.
 - **Sorting.** Turn on *Sort By Ground Depth* (sets `sortingOrder` from the ground depth, works
   with every pipeline), or use a custom transparency sort axis (0, 1, 0) (Project Settings >
   Graphics, or the 2D Renderer asset in URP).
@@ -107,14 +128,20 @@ offers two outputs:
 
 - **Export Sprite Sheet**: PNG page(s) plus `ppc.spritesheet` JSON metadata (frame rectangles,
   pivots, timing, root motion), imported as point-filtered, uncompressed sprites.
-- **Bake**: a texture asset per page with one `Sprite` sub-asset per frame (pivot on the ground
-  point), an `AnimationClip` per clip and direction that swaps `SpriteRenderer.sprite`, and an
-  `AnimatorController` with one state per clip. Baked creations need no runtime code at all.
+- **Bake**: PNG sheet pages (at most 4096 px, imported point filtered and without resizing), a
+  `PixelCreatureSpriteSet` asset with one `Sprite` sub-asset per frame (pivot on the ground point), an
+  `AnimationClip` per clip and direction that swaps `SpriteRenderer.sprite`, and an
+  `AnimatorController` with one state per clip. Baked creations need no runtime code at all; the sprite
+  set can also drive them from code (`spriteSet.Find("walk", 7).FrameAt(time)`). Baking the same
+  creation again updates every asset in place, so animators, prefabs and scenes that use them keep
+  working; outputs that are no longer produced are removed.
 
 ## Platforms and IL2CPP
 
-- `Runtime/link.xml` and a build-time linker processor keep the creation families (they are
-  found by reflection) when managed code stripping is on.
+- `Runtime/link.xml` and a build-time linker processor keep the package assemblies and every
+  `[CreatureExtension]` class of your game assemblies (they are created by reflection) when managed
+  code stripping is on; the rest of your code is stripped as usual.
+- Edit mode previews are never saved and are removed before a player build processes a scene.
 - Families of your own: implement `ICreatureFamily` (or derive from `CreatureFamilyBase`) in a
   class marked `[CreatureExtension]`; assemblies that reference `PixelCreatures.Core` are scanned
   automatically and preserved in IL2CPP builds.
@@ -138,7 +165,8 @@ Add the package to `testables` in `Packages/manifest.json`:
 ```
 
 Window > General > Test Runner > EditMode runs the full core suite (including the golden values)
-inside Unity and tests of the actor, presets, coordinates and baking.
+inside Unity and tests of the actor (every family, biome looks, the density limit), presets,
+coordinates and baking (including re-baking in place).
 
 ## Layout
 

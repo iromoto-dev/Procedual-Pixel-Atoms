@@ -25,6 +25,7 @@ namespace PixelCreatures.Workshop
         public void ExportPreviewSheet() => _export.ExportSheet();
 
         private OptionButton _family = null!;
+        private OptionButton _biomePicker = null!;
         private LineEdit _seed = null!;
         private Label _title = null!;
         private Label _statusText = null!;
@@ -75,6 +76,11 @@ namespace PixelCreatures.Workshop
 
             var initial = LoadStartGenome();
             State = new WorkshopState(CreatureRuntime.Registry, initial);
+            // --biome=snow on the command line, or coming back from the test area: keep its biome
+            var biomeArg = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--biome=", StringComparison.Ordinal));
+            if (biomeArg != null) TestAreaLauncher.PendingBiome = biomeArg.Substring("--biome=".Length);
+            if (TestAreaLauncher.PendingBiome != null) State.SetBiome(CreatureRuntime.GetBiome(TestAreaLauncher.PendingBiome));
+            EnvironmentArt.Theme = GroundTheme.For(State.Biome);
 
             var root = new VBoxContainer();
             root.SetAnchorsPreset(LayoutPreset.FullRect);
@@ -160,6 +166,7 @@ namespace PixelCreatures.Workshop
             _info.Bind(this);
 
             State.GenomeChanged += OnGenomeChanged;
+            State.BiomeChanged += OnBiomeChanged;
             PreviewActor.ModelChanged += () =>
             {
                 Editor.ShowPalette(PreviewActor.Model?.Palette);
@@ -197,6 +204,7 @@ namespace PixelCreatures.Workshop
             var actor = scene.Instantiate<CreatureActor>();
             actor.FamilyId = string.Empty;
             actor.AnimationFps = 15;
+            actor.Biome = State?.Biome.Id ?? Biomes.TemperateId;
             // Simulate travel for the gait, but keep the preview and its background in place.
             actor.SyncNodePosition = false;
             // Pixel stages zoom by themselves: one texel per stage pixel, so HD sprites show all their detail.
@@ -220,14 +228,25 @@ namespace PixelCreatures.Workshop
             tools.AddThemeConstantOverride("separation", 6);
             _editorTools = tools;
             bar.AddChild(tools);
-            _family = new OptionButton { FocusMode = FocusModeEnum.None, TooltipText = "Body-plan family", CustomMinimumSize = new Vector2(190, 0) };
+            _family = new OptionButton { FocusMode = FocusModeEnum.None, TooltipText = "Body-plan family", CustomMinimumSize = new Vector2(176, 0) };
             foreach (var f in _families) _family.AddItem(CreatureRuntime.FamilyLabel(f));
             tools.AddChild(_family);
+            _biomePicker = new OptionButton { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(100, 0),
+                TooltipText = "Biome: new creatures and rolls are adapted to it (desert cacti, snow coats, jungle colours ...);\nthe look (snow, sand, moss, mud) applies to every preview right away" };
+            var biomes = CreatureRuntime.Biomes;
+            for (int i = 0; i < biomes.Count; i++)
+            {
+                _biomePicker.AddItem(biomes[i].DisplayName);
+                _biomePicker.SetItemTooltip(i, biomes[i].Description);
+            }
+            _biomePicker.Selected = Math.Max(0, biomes.ToList().FindIndex(b => b.Id == State.Biome.Id));
+            _biomePicker.ItemSelected += i => State.SetBiome(CreatureRuntime.Biomes[(int)i]);
+            tools.AddChild(_biomePicker);
             tools.AddChild(UiKit.Label("Seed", 13, UiKit.TextDim));
-            _seed = new LineEdit { CustomMinimumSize = new Vector2(150, 0), PlaceholderText = "Number or text", TooltipText = "Seed: a number or any text. Same seed + family = same creature." };
+            _seed = new LineEdit { CustomMinimumSize = new Vector2(124, 0), PlaceholderText = "Number or text", TooltipText = "Seed: a number or any text. Same seed + family = same creature." };
             _seed.TextSubmitted += _ => NewFromSeedField();
             tools.AddChild(_seed);
-            var create = new Button { Text = "New creature", Icon = Icons.Get("new", 1), FocusMode = FocusModeEnum.None, TooltipText = "New creature from family and seed (locked traits are kept)" };
+            var create = new Button { Text = "New", Icon = Icons.Get("new", 1), FocusMode = FocusModeEnum.None, TooltipText = "New creature from family, seed and biome (locked traits are kept)" };
             create.Pressed += NewFromSeedField;
             tools.AddChild(create);
             var dice = new Button { Text = "Roll", Icon = Icons.Get("dice", 1), FocusMode = FocusModeEnum.None, TooltipText = "New random seed: regenerate all unlocked traits (F5)" };
@@ -295,6 +314,22 @@ namespace PixelCreatures.Workshop
         }
 
         private string SelectedFamily() => _families[Math.Max(0, _family.Selected)].Id;
+
+        private void OnBiomeChanged()
+        {
+            var b = State.Biome;
+            EnvironmentArt.Theme = GroundTheme.For(b);
+            TestAreaLauncher.PendingBiome = b.Id;
+            int bi = CreatureRuntime.Biomes.ToList().FindIndex(x => x.Id == b.Id);
+            if (bi >= 0 && _biomePicker.Selected != bi) _biomePicker.Selected = bi;
+            PreviewActor.Biome = b.Id;
+            PreviewStage.Ground.QueueRedraw();
+            _gallery?.BiomeChanged();
+            Overview?.BiomeChanged();
+            Status(b.IsNeutralSampling
+                ? "Biome: temperate. New creatures use the families' own looks."
+                : $"Biome: {b.DisplayName}. New creatures and rolls are adapted to it; press Roll or New.", UiKit.TextDim);
+        }
 
         private void NewFromSeedField()
         {
@@ -429,5 +464,7 @@ namespace PixelCreatures.Workshop
     public static class TestAreaLauncher
     {
         public static CreatureGenome? PendingGenome;
+        /// <summary>Biome shared by the workshop and the test area (null = temperate).</summary>
+        public static string? PendingBiome;
     }
 }

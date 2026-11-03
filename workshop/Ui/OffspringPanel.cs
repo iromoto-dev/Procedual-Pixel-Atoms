@@ -27,9 +27,9 @@ namespace PixelCreatures.Workshop
             var controls = new HBoxContainer();
             controls.AddThemeConstantOverride("separation", 6);
             _strengthLabel = UiKit.Label("Mutation strength 35%", 13);
-            _strengthLabel.CustomMinimumSize = new Vector2(160, 0);
+            _strengthLabel.CustomMinimumSize = new Vector2(132, 0);
             controls.AddChild(_strengthLabel);
-            var strength = new HSlider { MinValue = 0, MaxValue = 1, Step = 0.01, Value = _settings.Strength, CustomMinimumSize = new Vector2(150, 0), SizeFlagsVertical = SizeFlags.ShrinkCenter, FocusMode = FocusModeEnum.None };
+            var strength = new HSlider { MinValue = 0, MaxValue = 1, Step = 0.01, Value = _settings.Strength, CustomMinimumSize = new Vector2(128, 0), SizeFlagsVertical = SizeFlags.ShrinkCenter, FocusMode = FocusModeEnum.None };
             strength.ValueChanged += v => { _settings.Strength = v; _strengthLabel.Text = $"Mutation strength {v * 100:0}%"; Schedule(); };
             controls.AddChild(strength);
             controls.AddChild(StreamToggle("Anatomy", v => _settings.Anatomy = v, true));

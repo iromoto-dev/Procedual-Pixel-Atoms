@@ -174,6 +174,56 @@ claws, hooves, fingers, facial structure, flat ears, chitin joints and bristles 
 musculature, scutes and ribs. Detail primitives never enlarge the canvas, and classic density output is
 bit-identical to the output without them (the golden values pin both).
 
+## Biomes
+
+`Biome` (`Core/Biomes`) describes an environment on two layers. Built-in biomes are in `Biomes`
+(temperate, desert, snow, jungle, swamp, volcanic); extensions add more with
+`CreatureRegistry.RegisterBiome`. `registry.GetBiome(id)` falls back to temperate for unknown ids.
+
+**Sampling** (`GenomeFactory.Sample(family, seed, biome)`): the biome multiplies archetype weights
+(`Archetype(family, archetype, factor)`), coat weights (`Coat(scope, id, factor)`, `"*"` for every coat
+without its own rule) and pattern weights, adds coats a family lacks (`AddCoat`, as a share of the
+family's total coat weight), scales the glow chance and finally nudges genes towards targets
+(`Gene(scope, gene, target, amount)`; hue genes along the shorter arc). Scopes select categories
+(`BiomeScope.Animals`, `Flora`, `Props`), one family or one archetype. The order inside `Sample` is:
+archetype pick, anatomy sampling, biome-adjusted style hints, colour/pattern/motion sampling, the family's
+`AdjustSample`, the biome's gene nudges. The random streams are the same as without a biome, so a seed
+gives related creations in different biomes. A biome without rules (temperate, `IsNeutralSampling`) is
+skipped entirely: genomes are bit-identical to `Sample(family, seed)` (test
+`biome.sampling_neutral_deterministic_and_biased`). If a biome zeroes every archetype of a family, the
+family's own weights are used.
+
+**Look** (`BiomeOverlay`, part of `ViewSpec.Overlay`): a cover material (`OverlayMaterial`: snow,
+sand, moss, algae, ash) with amount and patchiness, a grime material (mud, dust, soot, snow) with the
+height it reaches, wetness and a colour grade. `Biome.OverlayFor(model, intensity)` gives the overlay
+for one creation: swimmers get no cover or grime, fliers half the grime, living creations
+`AnimalCover` times the cover of trees and props (moss grows on stone and wood, not on fur).
+
+Rendering with an overlay uses `CreatureModel.PaletteFor(overlay)`: a cached copy of the palette with
+the cover and grime ramps appended (outline = the creation's outline) and every colour graded. Indices of
+existing colours do not change. The renderer's overlay pass runs after composition and before the
+features:
+
+1. During stylization every covered pixel stores a value noise sampled in the part's surface
+   coordinates (U along, V around the part), so cover edges stay glued to the body in every pose.
+2. Classification: cover where the world-up component of the normal plus noise (and a bonus on the top
+   silhouette) exceeds `1 - 1.15 * CoverAmount`; grime where the pixel's world height is below
+   `GrimeAmount * max(2, 0.42 * TopHeight)` (noisy edge). Contours, features, back faces, eyes, mouths,
+   teeth and emissive parts are excluded.
+3. Clean-up: lone overlay pixels are dropped, single holes filled (clean pixel clusters).
+4. Colours: cover pixels use matte shading of their normal, limited to one level above the body shading
+   (keeps contact shadows), with sparkles on snow; grime keeps the body's shade levels; wet surfaces get
+   highlight glints.
+
+An inactive overlay skips all of this (renders are bit-identical; `PaletteFor(None)` returns the palette
+itself). Golden values pin the biased genome of every family per biome and the overlay renders of a
+creature, a tree and a prop (`render.deterministic_and_golden`, `biome.overlay_render`).
+
+The Godot `CreatureActor` and the Unity `PixelCreatureActor` sample in their `Biome` and render with
+`EffectiveOverlay` (or `OverlayOverride`), taking the overlay palette on the main thread so the worker
+renders indices and colours from the same palette. The workshop and test area colour their landscape
+from a `GroundTheme` per biome (ground, paths, shores, water, cliffs, foliage, bark).
+
 ## Animation
 
 `CreatureMotor` simulates one instance with a fixed time step. Each step:
@@ -294,10 +344,19 @@ Runtime behaviour mirrors the Godot layer:
 - **Render queue:** actors enqueue in `Update`; a hidden driver flushes the queue in `LateUpdate`,
   rasterizing all pending actors in parallel with thread-local renderers, then uploads on the main
   thread. Unity objects are only touched on the main thread.
-- **Baking (editor):** `PixelCreatureBaker` renders the sprite sheet with `SpritesheetExporter`, stores
-  each page as a texture asset with `Sprite` sub-assets (pivot on the ground point), writes one
-  `AnimationClip` per clip and direction (sprite keyframes on `SpriteRenderer.m_Sprite`, frame
-  durations from the exporter) and an `AnimatorController` with one state per clip.
+- **Baking (editor):** `PixelCreatureBaker` renders the sprite sheet with `SpritesheetExporter` (pages of
+  at most 4096 px, compact frames), writes the pages as PNG files imported point filtered, uncompressed
+  and without resizing, a `PixelCreatureSpriteSet` asset with one `Sprite` sub-asset per frame (pivot on
+  the ground point), one `AnimationClip` per clip and direction (sprite keyframes on
+  `SpriteRenderer.m_Sprite` at 1/fps) and an `AnimatorController` with one state per clip. Baking again
+  updates every asset in place (`EditorUtility.CopySerialized` for sprites), so GUIDs and references
+  survive; outputs no longer produced are deleted.
+- **Robustness:** the effective density is limited so sprites stay within the 1024 px frame limit; the
+  render queue isolates exceptions per actor; edit-mode previews are released on disable (domain reloads)
+  and before player builds process a scene (`IProcessSceneWithReport`); play-mode logic uses
+  `Application.IsPlaying(gameObject)` (prefab mode safe); a blocked `CanMove` step keeps the creature in
+  place without resetting its gait; the IL2CPP linker processor preserves only `[CreatureExtension]`
+  types of game assemblies (plus the package assemblies).
 - **Determinism:** bit-exact results are verified on .NET and Mono (`scripts/unity-check.sh` runs the
   core suite with its golden values on Mono). IL2CPP compiles to C++, where a compiler that contracts
   floating point operations could change single pixels; golden values are therefore only asserted on
@@ -309,7 +368,11 @@ Runtime behaviour mirrors the Godot layer:
 renderer as the live view. Looping clips (idle, walk, run, sleep) have an exact
 period (gait frequency snapped to fps/N, breathing and blinking quantized to the loop). All
 frames share size and origin (ground point); the root motion is stored in the metadata so that a
-game can move the sprite without foot sliding.
+game can move the sprite without foot sliding. Every clip occupies one row; clips longer than
+`MaxPageSize` wrap onto further rows, and rows are packed into pages below that size.
+`CompactFrames` keeps only the content of each captured frame during long exports (identical output,
+several times less memory). `Overlay` renders the frames with a biome look; the metadata then records
+`overlay` (and `biome` when set) and the palette of the overlay.
 
 Presets use the versioned `ppc.creature` JSON format and retain the family, generator version, genes,
 four random-stream seeds and lineage. `GenomeSerializer` validates input and applies registered

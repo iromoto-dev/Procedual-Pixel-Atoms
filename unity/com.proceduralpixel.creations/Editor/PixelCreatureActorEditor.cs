@@ -22,6 +22,7 @@ namespace PixelCreatures.Unity.Editor
             var familyProp = serializedObject.FindProperty("familyId");
             var seedProp = serializedObject.FindProperty("seed");
             var presetProp = serializedObject.FindProperty("preset");
+            var biomeProp = serializedObject.FindProperty("biome");
 
             EditorGUILayout.PropertyField(presetProp);
             using (new EditorGUI.DisabledScope(presetProp.objectReferenceValue != null))
@@ -41,7 +42,15 @@ namespace PixelCreatures.Unity.Editor
                         seedProp.stringValue = SeedRandom.Next(1, int.MaxValue).ToString();
                 }
             }
-            DrawPropertiesExcluding(serializedObject, "m_Script", "familyId", "seed", "preset");
+            var biomes = PixelCreatureRuntime.Biomes;
+            int bi = -1;
+            for (int i = 0; i < biomes.Count; i++) if (biomes[i].Id == biomeProp.stringValue) bi = i;
+            EditorGUI.showMixedValue = biomeProp.hasMultipleDifferentValues;
+            int nb = EditorGUILayout.Popup(new GUIContent("Biome", "Adapts sampled creations (desert, snow, jungle ...) and dresses the sprite with snow, sand, moss or mud."),
+                Math.Max(0, bi), biomes.Select(b => new GUIContent(b.DisplayName, b.Description)).ToArray());
+            EditorGUI.showMixedValue = false;
+            if (nb != bi && nb >= 0 && (bi >= 0 || nb > 0)) biomeProp.stringValue = biomes[nb].Id;
+            DrawPropertiesExcluding(serializedObject, "m_Script", "familyId", "seed", "preset", "biome");
             serializedObject.ApplyModifiedProperties();
 
             if (targets.Length != 1) return;
@@ -94,14 +103,27 @@ namespace PixelCreatures.Unity.Editor
             var genome = actor.Genome;
             if (genome == null) return;
             string path = EditorUtility.SaveFilePanelInProject("Save creation preset", PixelCreatureBaker.SafeName(genome.Name), "json", "ppc.creature preset (JSON)");
-            if (string.IsNullOrEmpty(path)) return;
-            System.IO.File.WriteAllText(path, PixelCreatureRuntime.SavePreset(genome));
-            AssetDatabase.ImportAsset(path);
-            var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
-            if (asset == null) return;
-            Undo.RecordObject(actor, "Assign creation preset");
-            actor.Preset = asset;
-            EditorUtility.SetDirty(actor);
+            if (!string.IsNullOrEmpty(path))
+            {
+                try
+                {
+                    System.IO.File.WriteAllText(path, PixelCreatureRuntime.SavePreset(genome));
+                    AssetDatabase.ImportAsset(path);
+                    var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+                    if (asset != null)
+                    {
+                        Undo.RecordObject(actor, "Assign creation preset");
+                        actor.Preset = asset;
+                        EditorUtility.SetDirty(actor);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+            }
+            // a modal panel inside OnInspectorGUI invalidates the current layout pass
+            GUIUtility.ExitGUI();
         }
     }
 }

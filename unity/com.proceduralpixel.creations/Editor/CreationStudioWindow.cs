@@ -33,6 +33,8 @@ namespace PixelCreatures.Unity.Editor
         [SerializeField] private string _familyId = "quadruped";
         [SerializeField] private string _archetype = string.Empty;
         [SerializeField] private string _seed = "1";
+        [SerializeField] private string _biome = Biomes.TemperateId;
+        [SerializeField] private float _biomeIntensity = 1f;
         [SerializeField] private string _presetJson = string.Empty;
         [SerializeField] private int _clip;
         [SerializeField] private int _dir = 7;
@@ -109,8 +111,8 @@ namespace PixelCreatures.Unity.Editor
             if (!keepSeed) _seed = SeedRandom.Next(1, int.MaxValue).ToString();
             ulong seed = PixelCreatureRuntime.SeedFromText(_seed);
             var g = string.IsNullOrEmpty(_archetype)
-                ? PixelCreatureRuntime.Sample(_familyId, seed)
-                : PixelCreatureRuntime.SampleArchetype(_familyId, _archetype, seed);
+                ? PixelCreatureRuntime.Sample(_familyId, seed, _biome)
+                : PixelCreatureRuntime.SampleArchetype(_familyId, _archetype, seed, _biome);
             SetGenome(g);
         }
 
@@ -139,6 +141,19 @@ namespace PixelCreatures.Unity.Editor
         }
 
         private float Density => _density + 1;
+
+        /// <summary>The preview/export density, reduced for very large creations (frames are limited to 1024 px).</summary>
+        private float EffectiveDensity
+        {
+            get
+            {
+                if (_model == null) return Density;
+                int edge = Math.Max(_model.Anatomy.Canvas.Width, _model.Anatomy.Canvas.Height);
+                return Mathf.Max(1f, Mathf.Min(Density, PixelCreatureActor.MaxSpriteSize * 0.85f / Math.Max(1, edge)));
+            }
+        }
+
+        private BiomeOverlay Overlay => PixelCreatureRuntime.GetBiome(_biome).OverlayFor(_model, _biomeIntensity);
 
         // ------------------------------------------------------------------ animation
 
@@ -180,7 +195,7 @@ namespace PixelCreatures.Unity.Editor
         private void RenderPreview()
         {
             if (_model == null || _motor == null) return;
-            var c = _model.Anatomy.Canvas.Scaled(Density);
+            var c = _model.Anatomy.Canvas.Scaled(EffectiveDensity);
             if (_frame == null || _frame.Width != c.Width || _frame.Height != c.Height)
             {
                 _frame = new PixelFrame(c.Width, c.Height);
@@ -189,11 +204,13 @@ namespace PixelCreatures.Unity.Editor
             }
             _frame.OriginX = c.OriginX;
             _frame.OriginY = c.OriginY;
-            var view = ViewSpec.Default(_motor.Yaw, Density);
+            var view = ViewSpec.Default(_motor.Yaw, EffectiveDensity);
             view.DrawShadow = _shadow;
-            _renderer.Render(_model.Anatomy, _model.Palette, _model.Surface, _motor.Pose, view, _frame);
-            _model.Palette.BuildLut(_lut, _motor.HitFlash);
-            _frame.ToRgba(_lut, _rgba, _model.Palette.WaterTint);
+            view.Overlay = Overlay;
+            var palette = _model.PaletteFor(view.Overlay);
+            _renderer.Render(_model.Anatomy, palette, _model.Surface, _motor.Pose, view, _frame);
+            palette.BuildLut(_lut, _motor.HitFlash);
+            _frame.ToRgba(_lut, _rgba, palette.WaterTint);
             int row = c.Width * 4;
             for (int y = 0; y < c.Height; y++) Buffer.BlockCopy(_rgba, y * row, _flipped, (c.Height - 1 - y) * row, row);
             if (_preview == null || _preview.width != c.Width || _preview.height != c.Height)
@@ -248,6 +265,10 @@ namespace PixelCreatures.Unity.Editor
                 string s = EditorGUILayout.DelayedTextField(_seed, EditorStyles.toolbarTextField, GUILayout.Width(110));
                 if (s != _seed) { _seed = s; NewCreation(keepSeed: true); GUIUtility.ExitGUI(); }
                 if (GUILayout.Button("New", EditorStyles.toolbarButton, GUILayout.Width(44))) { NewCreation(keepSeed: false); GUIUtility.ExitGUI(); }
+                var biomes = PixelCreatureRuntime.Biomes;
+                int bi = Math.Max(0, biomes.ToList().FindIndex(b => b.Id == _biome));
+                int nb = EditorGUILayout.Popup(bi, biomes.Select(b => b.DisplayName).ToArray(), EditorStyles.toolbarPopup, GUILayout.Width(100));
+                if (nb != bi) { _biome = biomes[nb].Id; NewCreation(keepSeed: true); GUIUtility.ExitGUI(); }
                 GUILayout.FlexibleSpace();
                 GUILayout.Label("Mutation", GUILayout.Width(56));
                 _mutation = GUILayout.HorizontalSlider(_mutation, 0.05f, 1f, GUILayout.Width(80));
@@ -269,7 +290,8 @@ namespace PixelCreatures.Unity.Editor
         private void DrawPreview()
         {
             var rect = GUILayoutUtility.GetRect(320, 10000, 240, 10000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            EditorGUI.DrawRect(rect, new Color(0.24f, 0.3f, 0.26f));
+            var biome = PixelCreatureRuntime.GetBiome(_biome);
+            EditorGUI.DrawRect(rect, biome.Id == Biomes.TemperateId ? new Color(0.24f, 0.3f, 0.26f) : (Color)PixelCreatureRuntime.ToColor(biome.Ground));
             if (_preview == null) return;
             int zoom = _zoom > 0 ? _zoom : Math.Max(1, Math.Min((int)(rect.width / _preview.width), (int)(rect.height / _preview.height)));
             float w = _preview.width * zoom, h = _preview.height * zoom;
@@ -310,9 +332,11 @@ namespace PixelCreatures.Unity.Editor
                     _zoom = EditorGUILayout.IntSlider("Zoom (0 = fit)", _zoom, 0, 12);
                     bool shadow = EditorGUILayout.Toggle("Ground shadow", _shadow);
                     if (shadow != _shadow) { _shadow = shadow; RenderPreview(); }
+                    float bint = EditorGUILayout.Slider(new GUIContent("Biome look", "Strength of snow, sand, moss, mud and colour grade (0 = off)."), _biomeIntensity, 0f, 2f);
+                    if (Math.Abs(bint - _biomeIntensity) > 1e-4f) { _biomeIntensity = bint; RenderPreview(); }
                     if (_model != null)
                     {
-                        var c = _model.Anatomy.Canvas.Scaled(Density);
+                        var c = _model.Anatomy.Canvas.Scaled(EffectiveDensity);
                         EditorGUILayout.LabelField($"Sprite {c.Width}x{c.Height} px · {_model.Anatomy.Primitives.Count} primitives · {_model.Anatomy.Skeleton.Count} bones", EditorStyles.miniLabel);
                     }
                 }
@@ -378,6 +402,8 @@ namespace PixelCreatures.Unity.Editor
                         if (abs.StartsWith(data, StringComparison.Ordinal)) _folder = "Assets" + abs.Substring(data.Length);
                         else _status = "Choose a folder inside Assets.";
                     }
+                    // a modal panel inside OnGUI invalidates the current layout pass
+                    GUIUtility.ExitGUI();
                 }
             }
             using (new EditorGUILayout.HorizontalScope())
@@ -397,10 +423,10 @@ namespace PixelCreatures.Unity.Editor
             {
                 using (new EditorGUI.DisabledScope(_model == null))
                 {
-                    if (GUILayout.Button("Save Preset")) SavePreset();
+                    if (GUILayout.Button("Save Preset")) Run(SavePreset, "Saved");
                     if (GUILayout.Button("Export Sprite Sheet (PNG + JSON)")) Run(() => PixelCreatureBaker.ExportSpriteSheet(_model!, _folder, Options()), "Exported");
                     if (GUILayout.Button("Bake Sprites & Animations")) Run(() => PixelCreatureBaker.Bake(_model!, _folder, Options()), "Baked into");
-                    if (GUILayout.Button("Create Actor in Scene")) CreateActor();
+                    if (GUILayout.Button("Create Actor in Scene")) Run(CreateActor, "Created");
                 }
             }
         }
@@ -408,7 +434,11 @@ namespace PixelCreatures.Unity.Editor
         private BakeOptions Options()
         {
             var kinds = (ClipKind[])Enum.GetValues(typeof(ClipKind));
-            var o = new BakeOptions { Density = Density, PixelsPerUnit = _pixelsPerUnit, Fps = FpsOptions[Mathf.Clamp(_fpsIndex, 0, FpsOptions.Length - 1)], DrawShadow = _shadow };
+            var o = new BakeOptions
+            {
+                Density = EffectiveDensity, PixelsPerUnit = _pixelsPerUnit, Fps = FpsOptions[Mathf.Clamp(_fpsIndex, 0, FpsOptions.Length - 1)], DrawShadow = _shadow,
+                Overlay = Overlay, Biome = _biome == Biomes.TemperateId ? string.Empty : _biome,
+            };
             o.Clips.Clear();
             for (int i = 0; i < kinds.Length; i++) if (i >= _clipToggles.Length || _clipToggles[i]) o.Clips.Add(kinds[i]);
             if (o.Clips.Count == 0) o.Clips.Add(ClipKind.Idle);
@@ -421,11 +451,17 @@ namespace PixelCreatures.Unity.Editor
 
         private void Run(Func<string> action, string verb)
         {
+            if (!_folder.Replace('\\', '/').StartsWith("Assets", StringComparison.Ordinal))
+            {
+                _status = "The output folder must be inside the project's Assets folder (for example Assets/PixelCreations).";
+                return;
+            }
             try
             {
                 EditorUtility.DisplayProgressBar("Procedural Pixel Creations", "Rendering frames...", 0.5f);
                 string path = action();
                 _status = $"{verb} {path}";
+                if (string.IsNullOrEmpty(path)) return;
                 var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
                 if (asset != null) EditorGUIUtility.PingObject(asset);
             }
@@ -449,28 +485,29 @@ namespace PixelCreatures.Unity.Editor
             return path;
         }
 
-        private void SavePreset()
+        private string SavePreset()
         {
-            if (_genome == null) return;
-            string path = SavePresetAsset();
-            _status = $"Saved {path}";
-            EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<TextAsset>(path));
+            if (_genome == null) return string.Empty;
+            return SavePresetAsset();
         }
 
-        private void CreateActor()
+        private string CreateActor()
         {
-            if (_genome == null) return;
-            var preset = AssetDatabase.LoadAssetAtPath<TextAsset>(SavePresetAsset());
+            if (_genome == null) return string.Empty;
+            string presetPath = SavePresetAsset();
+            var preset = AssetDatabase.LoadAssetAtPath<TextAsset>(presetPath);
             var go = new GameObject(_genome.Name, typeof(SpriteRenderer));
             Undo.RegisterCreatedObjectUndo(go, "Create pixel creation");
             var actor = go.AddComponent<PixelCreatureActor>();
             actor.Preset = preset;
+            actor.Biome = _biome;
+            actor.BiomeIntensity = _biomeIntensity;
             actor.PixelDensity = Density;
             actor.PixelsPerUnit = _pixelsPerUnit;
             actor.BuildFromSettings(async: false);
             if (SceneView.lastActiveSceneView != null) go.transform.position = new Vector3(SceneView.lastActiveSceneView.pivot.x, SceneView.lastActiveSceneView.pivot.y, 0);
             Selection.activeGameObject = go;
-            _status = $"Created {go.name} (preset {AssetDatabase.GetAssetPath(preset)}).";
+            return $"{go.name} (preset {presetPath})";
         }
     }
 }
