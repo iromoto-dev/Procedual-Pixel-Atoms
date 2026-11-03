@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - ears, horns and dorsal features (spikes, plates, ridges, manes).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

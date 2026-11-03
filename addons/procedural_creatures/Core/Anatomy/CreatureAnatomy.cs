@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - immutable anatomy and the builder used by families and shape blocks.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 

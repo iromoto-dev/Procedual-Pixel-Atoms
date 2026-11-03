@@ -2,6 +2,8 @@
 // dragonflies and wasps). Feathered, membrane or insect wings; birds walk and take off when they
 // run, bats and insects hover.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

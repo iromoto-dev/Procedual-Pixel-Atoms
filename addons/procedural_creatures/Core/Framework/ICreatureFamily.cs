@@ -4,6 +4,8 @@
 // anatomies. It never touches colours or animation directly: colours come from palette rules,
 // animation from motion modules selected through the anatomy's MotionRig.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

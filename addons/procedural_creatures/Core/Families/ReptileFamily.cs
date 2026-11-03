@@ -2,6 +2,8 @@
 // salamanders, drakes and winged dragons). Low slung bodies on sprawling or semi-erect legs, long
 // heavy tails, scales; dragons may carry membrane wings and fly.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

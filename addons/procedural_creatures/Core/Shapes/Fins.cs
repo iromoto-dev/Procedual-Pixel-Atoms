@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - fins (pectoral, pelvic, dorsal, anal, ray wings) and pincers.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

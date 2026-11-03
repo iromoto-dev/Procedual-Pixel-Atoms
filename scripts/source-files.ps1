@@ -12,7 +12,7 @@ function Get-SourceFiles([string]$Root) {
         Get-Item -LiteralPath $path
     }
     $pending = New-Object 'System.Collections.Generic.Stack[string]'
-    foreach ($name in @('.github', 'addons', 'docs', 'examples', 'scripts', 'tests', 'tools', 'workshop')) {
+    foreach ($name in @('.github', 'addons', 'docs', 'examples', 'scripts', 'tests', 'tools', 'unity', 'workshop')) {
         $path = Join-Path $rootPath $name
         if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Missing source directory: $name" }
         $pending.Push($path)

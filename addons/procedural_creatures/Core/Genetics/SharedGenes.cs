@@ -3,6 +3,8 @@
 // All families use the same colour/pattern/motion genes. Families only bias the sampling through
 // FamilyStyleHints, which keeps palettes and motion personalities comparable across body plans.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 

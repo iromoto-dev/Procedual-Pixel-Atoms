@@ -2,6 +2,8 @@
 // mushroom folk, flytraps, cacti, blossoms). Uses the core blocks (legs, heads, dorsal spikes) and
 // its own leaf block, palette rule and root-walk locomotion - all looked up through the registry.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core;

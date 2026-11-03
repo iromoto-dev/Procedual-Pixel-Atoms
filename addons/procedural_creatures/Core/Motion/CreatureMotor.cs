@@ -5,6 +5,8 @@
 // the fixed step count, never on the render frame rate: the same input history reproduces the same
 // poses on every machine.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

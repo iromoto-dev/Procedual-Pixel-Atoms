@@ -5,6 +5,8 @@
 // use every built-in block. A block only talks to the AnatomyBuilder: it adds bones, groups,
 // primitives and features and reports the rig pieces it created.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

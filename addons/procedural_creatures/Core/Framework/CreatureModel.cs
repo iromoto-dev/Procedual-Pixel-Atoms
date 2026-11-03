@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - immutable creature model and the caching factory that builds it.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Threading;

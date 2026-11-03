@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - minimal deterministic test runner shared by the console harness and
 // the Godot --self-test mode. Produces a structured JSON report.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

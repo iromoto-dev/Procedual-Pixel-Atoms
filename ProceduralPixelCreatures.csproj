@@ -30,5 +30,8 @@
     <Compile Remove="tools/**" />
     <None Remove="tools/**" />
     <Compile Remove="docs/**;build/**;reports/**;out/**" />
+    <!-- The Unity package mirrors the core for Unity; it is not part of the Godot build. -->
+    <Compile Remove="unity/**" />
+    <None Remove="unity/**" />
   </ItemGroup>
 </Project>

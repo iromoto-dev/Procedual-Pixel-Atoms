@@ -9,6 +9,8 @@
 //   * a locomotion module     -> "rootwalk" (waddling root legs that sway like plants)
 // Removing the folder removes the family; nothing in the core refers to it.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core;
 using PixelCreatures.Core.Anatomy;

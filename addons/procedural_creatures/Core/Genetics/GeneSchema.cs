@@ -6,6 +6,8 @@
 // bools 0/1, ints integral values. Float genes are quantized to a fixed grid so that a value that
 // survives a JSON round trip is bit identical to the value used for generation.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;

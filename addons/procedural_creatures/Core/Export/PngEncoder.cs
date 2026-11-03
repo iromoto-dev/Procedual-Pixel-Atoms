@@ -3,6 +3,8 @@
 // are used (Godot, Unity Mono and IL2CPP): the zlib stream is assembled from DeflateStream plus the zlib
 // header and Adler-32 trailer, with uncompressed deflate blocks where a platform has no deflate.
 
+#nullable enable
+
 using System;
 using System.IO;
 using System.IO.Compression;

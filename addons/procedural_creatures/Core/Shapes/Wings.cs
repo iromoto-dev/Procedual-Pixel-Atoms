@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - wing shape block: membrane wings (bats, dragons), feathered wings
 // (birds, griffins) and insect wings. Wings are built spread; RigDriver folds and flaps them.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

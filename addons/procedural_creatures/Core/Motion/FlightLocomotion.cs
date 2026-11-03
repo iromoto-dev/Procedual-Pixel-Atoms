@@ -6,6 +6,8 @@
 // with a flare when it slows down. Hovering creatures (insects, creatures without legs) stay
 // airborne and only land to rest. Everything runs on the fixed simulation clock.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

@@ -5,6 +5,8 @@
 // wood planks, masonry courses and metal bands line up across the two triangles of a quad. All
 // coordinates are in the frame of one bone; the solid moves rigidly with it.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

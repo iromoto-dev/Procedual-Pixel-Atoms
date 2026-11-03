@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - head shape block: cranium, snout, jaw with mouth interior and teeth,
 // brow, cheeks, eyes and nostrils. Ears and horns are separate blocks that attach to the head bone.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

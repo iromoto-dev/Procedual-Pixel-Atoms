@@ -1,0 +1,35 @@
+{
+  "name": "com.proceduralpixel.creations",
+  "version": "1.1.0",
+  "displayName": "Procedural Pixel Creations",
+  "description": "Procedural pixel-art creatures, mythical creatures, monsters, trees and flora, and props: generated, animated and rasterized in code at HD pixel density. Live PixelCreatureActor components, a Creation Studio editor window with gene editing, presets, sprite sheet export and baking to sprites, animation clips and animator controllers.",
+  "unity": "2021.3",
+  "documentationUrl": "https://github.com/iromoto-dev/Procedual-Pixel-Atoms/blob/main/unity/com.proceduralpixel.creations/README.md",
+  "license": "MIT",
+  "author": {
+    "name": "idlerunner00"
+  },
+  "keywords": [
+    "procedural",
+    "pixel art",
+    "sprites",
+    "creatures",
+    "monsters",
+    "trees",
+    "props",
+    "generator",
+    "animation"
+  ],
+  "samples": [
+    {
+      "displayName": "Demo scene setup",
+      "description": "A script that spawns a mixed crowd of creatures, mythical creatures, monsters, trees and props, with one creature you can steer (legacy Input Manager or Input System).",
+      "path": "Samples~/Demo"
+    },
+    {
+      "displayName": "Example presets",
+      "description": "92 ppc.creature presets: at least six per family.",
+      "path": "Samples~/Presets"
+    }
+  ]
+}

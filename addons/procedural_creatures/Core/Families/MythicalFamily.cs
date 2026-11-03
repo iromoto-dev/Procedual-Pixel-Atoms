@@ -7,6 +7,8 @@
 // antlers, flowing manes that sway (spring chains), scorpion tails, additional heads on long necks
 // that weave independently (appendage chains), and a humanoid upper body with arms for centaurs.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

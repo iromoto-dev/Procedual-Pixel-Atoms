@@ -1,0 +1,16 @@
+{
+    "name": "PixelCreatures.Plantfolk",
+    "rootNamespace": "PixelCreatures.Plantfolk",
+    "references": [
+        "PixelCreatures.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

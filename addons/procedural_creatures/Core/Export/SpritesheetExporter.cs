@@ -7,6 +7,8 @@
 // point below the root); root motion speed is written to the metadata so playback moves the sprite
 // without foot sliding.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;

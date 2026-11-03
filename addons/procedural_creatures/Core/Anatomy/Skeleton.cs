@@ -6,6 +6,8 @@
 // World transforms are expressed in creature space: +X forward, +Y up, +Z to the creature's right,
 // origin on the ground below the root.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 

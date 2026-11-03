@@ -13,6 +13,8 @@
 // The complete license and attribution are included in THIRD_PARTY_NOTICES.md.
 // Changes: C# port, project-specific seeding and stream derivation.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;

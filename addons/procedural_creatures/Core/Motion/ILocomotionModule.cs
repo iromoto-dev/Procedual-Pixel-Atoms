@@ -5,6 +5,8 @@
 // after the body has been posed, solves its limbs. Modules are registered by id in the
 // CreatureRegistry; the anatomy's MotionRig selects one.
 
+#nullable enable
+
 using PixelCreatures.Core.Anatomy;
 
 namespace PixelCreatures.Core.Motion

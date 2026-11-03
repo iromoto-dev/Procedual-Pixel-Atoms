@@ -71,6 +71,9 @@ namespace PixelCreatures.Harness
                     }
                     return 0;
                 }
+                case "unity-sync":
+                    // unity-sync <repoRoot> [--check]: mirror core, plantfolk, tests and presets into the Unity package
+                    return UnitySync.Run(outDir, Array.IndexOf(args, "--check") >= 0);
                 case "sheet":
                     // sheet <outDir> [family[,family]|all] [count] [scale] [--by-archetype] [--walk] [--dir=N] [--seed=N]
                     return ContactSheet.Run(outDir, args.Length > 2 ? args[2..] : Array.Empty<string>());
@@ -78,6 +81,7 @@ namespace PixelCreatures.Harness
                     Console.WriteLine("CoreHarness test <outdir> [filter|all] [seedsPerFamily]");
                     Console.WriteLine("CoreHarness sheet <outdir> [family|all] [count] [scale] [--by-archetype] [--walk] [--dir=N]");
                     Console.WriteLine("CoreHarness goldens  (print deterministic baseline values)");
+                    Console.WriteLine("CoreHarness unity-sync <repoRoot> [--check]  (update or verify unity/com.proceduralpixel.creations)");
                     return command == "help" ? 0 : 1;
             }
         }

@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - family 1: quadruped mammals and heavy beasts.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

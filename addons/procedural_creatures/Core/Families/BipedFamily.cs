@@ -2,6 +2,8 @@
 // kobolds, yetis, orcs, dwarves). Upright torso on two legs, arms with hands, procedural weapons and
 // gear: clothing, head gear, shields, pauldrons and beards in their own groups and colours.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

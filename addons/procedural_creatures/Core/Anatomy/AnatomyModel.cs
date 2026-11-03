@@ -5,6 +5,8 @@
 // to bones, the part groups that control blending/contours, facial features, the semantic motion
 // rig used by the motion modules, and measured metrics.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 

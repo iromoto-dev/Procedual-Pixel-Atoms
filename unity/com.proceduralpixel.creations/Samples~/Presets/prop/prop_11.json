@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Fenaidor",
+  "seeds": {
+    "anatomy": "1200747001115579245",
+    "color": "17075757328738384387",
+    "pattern": "14177737560696535593",
+    "motion": "18015632108057679698"
+  },
+  "genes": {
+    "form": "crate",
+    "size": 0.48,
+    "height": 0.345,
+    "width": 0.743,
+    "count": 0.375,
+    "wear": 0.107,
+    "ornament": 0.176,
+    "light": 0.83,
+    "color.clothHue": 205,
+    "color.clothSaturation": 0.66,
+    "color.clothValue": 0.439,
+    "color.metal": "steel",
+    "color.hue": 46.5,
+    "color.saturation": 0.319,
+    "color.value": 0.406,
+    "color.scheme": "natural",
+    "color.secondaryShift": 0.524,
+    "color.bellyLight": 0.461,
+    "color.markingDark": 0.389,
+    "color.accent": "dark",
+    "color.eyeHue": 307,
+    "color.glow": 0,
+    "color.hueShift": 0.484,
+    "color.outline": 0.371,
+    "surface.material": "wood",
+    "surface.texture": 0.757,
+    "pattern.type": "none",
+    "pattern.size": 0.771,
+    "pattern.density": 0.408,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

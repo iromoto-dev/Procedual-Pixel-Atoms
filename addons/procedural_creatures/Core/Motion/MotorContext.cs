@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - shared motor state visible to all motion modules.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

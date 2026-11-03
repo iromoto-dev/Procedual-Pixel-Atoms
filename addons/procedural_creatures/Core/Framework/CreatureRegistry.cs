@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - registry of families, shape blocks, palette rules, material styles
 // and motion modules. This is the single place where extensions plug in.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -44,8 +46,14 @@ namespace PixelCreatures.Core
                     if (_shared == null)
                     {
                         var r = CreateDefault();
+                        // only assemblies that reference the framework can contain extensions; skipping the rest keeps
+                        // discovery fast in hosts with hundreds of assemblies (Unity editor) and avoids dynamic ones
+                        string core = typeof(CreatureRegistry).Assembly.GetName().Name ?? string.Empty;
                         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies().OrderBy(a => a.FullName, StringComparer.Ordinal))
+                        {
+                            if (asm.IsDynamic || !ReferencesCore(asm, core)) continue;
                             r.DiscoverExtensions(asm);
+                        }
                         _shared = r;
                     }
                     return _shared;
@@ -172,6 +180,21 @@ namespace PixelCreatures.Core
             extension.Register(this);
         }
 
+        private static bool ReferencesCore(Assembly asm, string core)
+        {
+            if (asm == typeof(CreatureRegistry).Assembly) return true;
+            try
+            {
+                foreach (var r in asm.GetReferencedAssemblies())
+                    if (string.Equals(r.Name, core, StringComparison.Ordinal)) return true;
+            }
+            catch (Exception)
+            {
+                // assemblies that cannot describe their references cannot contain extensions either
+            }
+            return false;
+        }
+
         /// <summary>Registers every class marked [CreatureExtension] that implements ICreatureExtension.</summary>
         public int DiscoverExtensions(Assembly assembly)
         {
@@ -179,6 +202,7 @@ namespace PixelCreatures.Core
             Type[] types;
             try { types = assembly.GetTypes(); }
             catch (ReflectionTypeLoadException e) { types = e.Types.Where(t => t != null).ToArray()!; }
+            catch (Exception) { return 0; }
             foreach (var t in types.OrderBy(t => t.FullName, StringComparer.Ordinal))
             {
                 if (t.IsAbstract || !typeof(ICreatureExtension).IsAssignableFrom(t)) continue;

@@ -6,6 +6,8 @@
 // Colours are shared between ramps (outline, deep shadow, whites) to keep the visible colour count
 // of a creature in the 10..16 range.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Genetics;

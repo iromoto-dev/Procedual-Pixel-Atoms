@@ -6,6 +6,8 @@
 // flicker and banners and lanterns swing in the wind (spring chains), the "action" shakes the object
 // and opens lids (the chest lid is the rig's jaw), hits make it wobble about its base.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

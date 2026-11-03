@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - turns PoseParams into bone transforms (generic for all body plans).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

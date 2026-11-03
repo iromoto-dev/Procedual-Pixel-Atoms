@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - registration of all built-in content.
 
+#nullable enable
+
 using PixelCreatures.Core.Families;
 using PixelCreatures.Core.Motion;
 using PixelCreatures.Core.Palettes;

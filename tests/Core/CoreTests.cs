@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - engine independent test suite (runs in the console harness and inside
 // Godot via --self-test). Everything here is deterministic.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;

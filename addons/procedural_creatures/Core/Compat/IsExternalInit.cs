@@ -3,6 +3,8 @@
 // C# 9 'init' accessors need this marker type. .NET 5+ ships it; Unity's class libraries do not. It is
 // internal, so it never clashes with a copy defined by another assembly of the host project.
 
+#nullable enable
+
 #if !NET5_0_OR_GREATER
 namespace System.Runtime.CompilerServices
 {

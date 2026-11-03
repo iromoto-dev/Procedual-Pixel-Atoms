@@ -5,6 +5,8 @@
 // ground, so it never slides: all travel happens in the air. Jelly bodies get secondary motion from
 // damped springs that are excited by landings, turns and idle "blorps".
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

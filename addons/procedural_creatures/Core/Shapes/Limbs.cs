@@ -3,6 +3,8 @@
 // Legs are built in their standing rest pose. The same solver is used by the motion system at
 // runtime, so the rest pose is exactly the pose the gait starts from.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

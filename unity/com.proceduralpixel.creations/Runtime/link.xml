@@ -1,0 +1,6 @@
+<linker>
+  <!-- Extensions are discovered by reflection; keep the framework assemblies intact under IL2CPP stripping. -->
+  <assembly fullname="PixelCreatures.Core" preserve="all"/>
+  <assembly fullname="PixelCreatures.Plantfolk" preserve="all"/>
+  <assembly fullname="PixelCreatures.Unity" preserve="all"/>
+</linker>

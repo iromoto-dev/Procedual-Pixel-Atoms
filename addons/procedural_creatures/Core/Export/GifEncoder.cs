@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - animated GIF encoder (lossless for pixel art: exact colour table).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;

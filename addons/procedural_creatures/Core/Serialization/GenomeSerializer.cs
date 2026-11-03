@@ -15,6 +15,8 @@
 // Errors make a file unusable (wrong format, newer version, unknown family, broken values). Warnings
 // describe automatic repairs (missing genes -> defaults, out of range -> clamped, unknown genes ignored).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;

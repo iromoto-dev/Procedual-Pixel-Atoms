@@ -7,6 +7,8 @@
 // e.g. after stopping or while turning in place). Landing spots are predicted from the root
 // velocity so that mid-stance happens under the hip.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Shapes;

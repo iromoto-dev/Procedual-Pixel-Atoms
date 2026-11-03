@@ -2,6 +2,8 @@
 // octopoids, jellyfish, floating eyes, wisps). Soft bodies that hop with squash and stretch or
 // float with trailing, spring simulated tentacles.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

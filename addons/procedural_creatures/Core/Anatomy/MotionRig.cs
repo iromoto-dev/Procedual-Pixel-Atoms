@@ -5,6 +5,8 @@
 // (lengths, rest foot positions). Motion modules never look at primitives; anatomy builders never
 // compute animation. This keeps both sides replaceable.
 
+#nullable enable
+
 using System.Collections.Generic;
 
 namespace PixelCreatures.Core.Anatomy

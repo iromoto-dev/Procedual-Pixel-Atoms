@@ -8,6 +8,8 @@
 //   wind.hz      gust frequency in Hz (default 0.35)
 // Export mode snaps all frequencies to the loop length so idle animations loop seamlessly.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

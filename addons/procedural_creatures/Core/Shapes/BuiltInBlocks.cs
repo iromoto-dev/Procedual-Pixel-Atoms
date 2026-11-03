@@ -4,6 +4,8 @@
 // same blocks up by id in the CreatureRegistry and drive them with a loose ShapeParams bag, so a
 // new body plan can reuse legs, tails, wings, fins, horns ... without referencing the spec types.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

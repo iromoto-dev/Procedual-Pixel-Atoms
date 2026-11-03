@@ -10,6 +10,8 @@
 // shape (an S or a loose curl, built by integrating the heading so arc lengths stay exact) and
 // rearing species lift the front of the body into an upright column with the head bent forward.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

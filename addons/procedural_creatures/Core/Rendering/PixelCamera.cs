@@ -6,6 +6,8 @@
 // ground depth by sin(elevation).
 // View space: +x right, +y up on screen, +z towards the viewer (larger z = closer).
 
+#nullable enable
+
 using System;
 
 namespace PixelCreatures.Core

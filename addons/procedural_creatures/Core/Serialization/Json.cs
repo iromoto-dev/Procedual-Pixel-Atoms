@@ -7,6 +7,8 @@
 // output, comments and trailing commas when parsing) and writes the same text: two space indentation,
 // ASCII only output with \uXXXX escapes, shortest round-trip numbers.
 
+#nullable enable
+
 using System;
 using System.Collections;
 using System.Collections.Generic;

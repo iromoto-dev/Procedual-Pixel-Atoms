@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - creature palette with material ramps and shading styles.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

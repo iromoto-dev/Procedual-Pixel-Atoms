@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - family 7: aquatic creatures (reef fish, sharks, rays, pufferfish,
 // anglerfish, eels). Streamlined bodies with paired and median fins that swim in open water.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

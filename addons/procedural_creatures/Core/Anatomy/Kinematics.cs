@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - inverse kinematics helpers shared by anatomy builders (rest pose)
 // and motion modules (runtime). All solvers are analytic and deterministic.
 
+#nullable enable
+
 using System;
 
 namespace PixelCreatures.Core.Anatomy

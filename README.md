@@ -11,6 +11,10 @@ faces, branches, objects, colors, markings, rigs and movement are all generated 
 There are no premade creature sprites or AI-generated source images. After the initial setup,
 the application runs offline without an AI service.
 
+The same engine-independent core also ships as a **Unity package** with live sprite actors, a
+Creation Studio editor window and baking to native sprites, animation clips and animator
+controllers; see [Unity](#unity).
+
 Explore thirteen families, edit their genes, breed new variants and watch up to 100 creatures
 roam a landscape with hills, cliffs and underwater habitats.
 
@@ -135,6 +139,33 @@ Set `CreatureActor.PixelDensity` (or `CreatureRuntime.DefaultDensity`) to choose
 with `ScaleToWorld` the sprite keeps its world size at any density. The
 [architecture guide](docs/ARCHITECTURE.md#extensions) describes the registration hooks.
 
+## Unity
+
+The package `unity/com.proceduralpixel.creations` brings every family to **Unity 2021.3 LTS or
+newer** (Unity 6 included; Built-in, URP and HDRP; Mono and IL2CPP). Install it with
+**Package Manager > + > Add package from git URL...**:
+
+```
+https://github.com/iromoto-dev/Procedual-Pixel-Atoms.git?path=/unity/com.proceduralpixel.creations
+```
+
+- **`PixelCreatureActor`** (GameObject > Procedural Pixel Creations > Pixel Creature Actor): a live,
+  animated creation on a `SpriteRenderer`, rendered in edit mode too. Steer it with
+  `MoveVelocity`, `FaceDirection`, `TriggerAction`, `TriggerHit` and `Resting`; models build on worker
+  threads and all actors rasterize together in parallel once per frame.
+- **Creation Studio** (Window > Procedural Pixel Creations > Creation Studio): browse every category,
+  preview the animation in eight directions, edit genes, save presets, export sprite sheets or
+  bake point-filtered sprites, `AnimationClip`s and an `AnimatorController` that need no runtime code.
+- Presets and seeds are interchangeable with the Godot workshop; a seed gives the same creation in
+  both engines.
+- A demo sample, 92 example presets and edit mode tests (including the core suite with its golden
+  values) are included.
+
+See the [package README](unity/com.proceduralpixel.creations/README.md) for the API, sorting,
+coordinates and platform notes. The package's copy of the core is generated from
+`addons/procedural_creatures/Core`; after changing the core run `bash scripts/unity-check.sh --sync`
+(see [Self-tests](#self-tests)).
+
 ### Exporting a game build
 
 This repository is a source release. In Godot, install the matching **4.5.2 .NET export templates**
@@ -198,7 +229,8 @@ the repository and are not removed by rebuilding it.
 | `examples/minimal_integration/` | Small Godot integration example |
 | `tests/` | Core/runtime tests, benchmarks and sample export verification |
 | `scripts/` | Automatic Windows setup, launchers, checks and source packaging |
-| `tools/core_harness/` | Console harness for the core without Godot |
+| `tools/core_harness/` | Console harness for the core without Godot; also keeps the Unity package in sync |
+| `unity/com.proceduralpixel.creations/` | Unity package: core, actor, Creation Studio, baking, tests, samples |
 | `docs/ARCHITECTURE.md` | Framework architecture and integration details |
 
 The [architecture guide](docs/ARCHITECTURE.md) explains generation, animation, rendering and terrain integration.
@@ -226,6 +258,19 @@ The harness also renders labelled contact sheets for visual review (`--density=2
 ```bash
 dotnet run -c Release --project tools/core_harness -- sheet reports/sheets flora 2 2 --by-archetype --density=2 --grid=6
 ```
+
+The Unity package is verified without a Unity installation by
+
+```bash
+bash scripts/unity-check.sh          # add --sync to update the package after core changes
+```
+
+It checks that the package mirrors the repository, compiles the core the way Unity does (C# 9,
+.NET Standard 2.1), compiles the Unity runtime (editor and player), editor tools, tests and demo
+against Unity 2021.3 reference assemblies without warnings, and runs the core suite with its golden
+values on Mono. It needs the .NET 8 SDK and, for the last step, Mono; the reference assemblies are
+downloaded from nuget.org into `.tools/`. Inside Unity, the package's edit mode tests run the same
+core suite plus actor, preset and baking tests.
 
 GitHub Actions is configured to run the full checks on Windows for pushes and pull requests.
 

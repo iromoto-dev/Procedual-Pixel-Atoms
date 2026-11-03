@@ -4,6 +4,8 @@
 // parameters. Transitions therefore blend parameters (not pixels), which keeps state changes smooth
 // and anatomically consistent. The RigDriver turns parameters into bone transforms.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

@@ -6,6 +6,8 @@
 // chains add drag, gravity and ground contact. Pulsing floaters (jellyfish) propel themselves with
 // rhythmic squash-and-stretch contractions whose rate follows the speed.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

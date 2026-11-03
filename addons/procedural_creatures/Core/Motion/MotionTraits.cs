@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - motion personality derived from the Motion stream and body metrics.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 using PixelCreatures.Core.Genetics;

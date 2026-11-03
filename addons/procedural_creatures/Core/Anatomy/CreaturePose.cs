@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - full creature pose: skeleton + facial expression + debug contacts.
 
+#nullable enable
+
 using System.Collections.Generic;
 
 namespace PixelCreatures.Core.Anatomy

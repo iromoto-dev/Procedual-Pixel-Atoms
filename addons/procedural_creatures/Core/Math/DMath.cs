@@ -18,6 +18,8 @@
 // is preserved.
 // Adapted to C# with bounded argument reduction; see THIRD_PARTY_NOTICES.md.
 
+#nullable enable
+
 using System;
 using System.Runtime.CompilerServices;
 

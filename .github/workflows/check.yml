@@ -20,6 +20,9 @@ jobs:
       - name: Check source package
         shell: powershell
         run: ./scripts/audit-source.ps1
+      - name: Check that the Unity package mirrors the core
+        shell: powershell
+        run: dotnet run -c Release --project tools/core_harness/CoreHarness.csproj -- unity-sync . --check
       - name: Build and run full core and Godot tests
         shell: powershell
         run: ./scripts/check.ps1

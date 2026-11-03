@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - small double precision linear algebra used by the core.
 // Engine independent on purpose: the core must run on worker threads and in tools without Godot.
 
+#nullable enable
+
 using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;

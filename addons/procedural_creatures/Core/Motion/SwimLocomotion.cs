@@ -6,6 +6,8 @@
 // tail sway and a gentle bob. Resting lowers it to the bottom. The tail spring chain supplies the
 // travelling-wave follow-through, so the module only drives the base of each wave.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

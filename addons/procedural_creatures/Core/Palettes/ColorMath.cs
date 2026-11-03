@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - deterministic colour math (sRGB <-> linear <-> OKLab/OKLCH).
 // OKLab (Björn Ottosson) gives perceptually even lightness steps, which is what shading ramps need.
 
+#nullable enable
+
 using System;
 using System.Globalization;
 

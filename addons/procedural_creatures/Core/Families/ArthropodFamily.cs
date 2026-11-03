@@ -2,6 +2,8 @@
 // mantises). Segmented bodies (head, thorax, abdomen) on four to eight jointed legs whose knees
 // rise above the body, optional pincers or raptorial blades, stinger tails and antennae.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

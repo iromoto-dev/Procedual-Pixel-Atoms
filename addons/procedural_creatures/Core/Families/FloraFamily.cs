@@ -8,6 +8,8 @@
 // leaves, and the smaller archetypes (bushes, giant mushrooms, cacti, flowers) reuse the same parts.
 // All flora is stationary and uses the "rooted" motion module.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

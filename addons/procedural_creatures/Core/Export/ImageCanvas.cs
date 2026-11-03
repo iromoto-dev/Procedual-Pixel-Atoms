@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - simple RGBA canvas with nearest-neighbour blits and a built-in 3x5
 // pixel font. Used for labelled contact sheets, spritesheets and reports without engine dependency.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Text;

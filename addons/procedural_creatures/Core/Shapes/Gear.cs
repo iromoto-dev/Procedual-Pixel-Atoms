@@ -3,6 +3,8 @@
 // body (depth bias) and fitted to the primitives it covers, so it sits cleanly on any build and in
 // every pose. Hanging cloth and beards are short spring chains: they lag behind, swing and settle.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

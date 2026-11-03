@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - idle life (breathing, blinking, fidgets), looking, actions, hits, rest.
 // All schedules are derived from the motion seed and the simulation clock: deterministic.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

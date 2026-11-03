@@ -6,6 +6,8 @@
 // the mimic's lid is its jaw, the wraith is a floating hooded cloak whose tattered hem and sleeves are
 // spring chains, the horror is a floating mass of eyes, a toothed maw and writhing tentacles.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

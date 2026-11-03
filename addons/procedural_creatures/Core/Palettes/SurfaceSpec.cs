@@ -5,6 +5,8 @@
 // dorsal line, positive towards the creature's right). Because the coordinates are computed from the
 // posed primitive's local frame, marks stay glued to the body during animation and never re-roll.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

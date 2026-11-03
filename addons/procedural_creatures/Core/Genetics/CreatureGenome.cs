@@ -4,6 +4,8 @@
 // stream (anatomy, color, pattern, motion); the builders for a stream only read the genes and the
 // seed of that stream. Changing a color gene therefore can never re-roll the anatomy.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;

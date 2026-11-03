@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - genetic operators: locks, mutation, crossover, regeneration.
 // All operators are pure functions of their inputs and an explicit seed.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;

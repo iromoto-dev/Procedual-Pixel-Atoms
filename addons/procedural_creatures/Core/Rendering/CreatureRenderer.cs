@@ -12,6 +12,8 @@
 //   6. Ground shadow and waterline.
 // The renderer is deterministic and allocation free after warm up. One instance per thread.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;

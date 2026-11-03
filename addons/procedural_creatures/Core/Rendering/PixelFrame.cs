@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - indexed output frame of the pixel renderer.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Palettes;
 

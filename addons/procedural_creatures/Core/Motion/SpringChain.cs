@@ -5,6 +5,8 @@
 // animated goal (stiffer near the base), then segment lengths are restored front to back
 // (follow-the-leader), and joints are kept above the ground. Fixed time step => deterministic.
 
+#nullable enable
+
 using System;
 using PixelCreatures.Core.Anatomy;
 

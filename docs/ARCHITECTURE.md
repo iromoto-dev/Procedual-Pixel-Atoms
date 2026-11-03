@@ -28,14 +28,15 @@ built once per genome and is immutable from then on; only the motor has state.
 
 | Folder | Role | Dependencies |
 |---|---|---|
-| `addons/procedural_creatures/Core/` | Framework core: math, genetics, body plans, shape blocks, anatomy, motion, rasterizer, palettes, serialization, export | .NET 8 only (no Godot types) |
+| `addons/procedural_creatures/Core/` | Framework core: math, genetics, body plans, shape blocks, anatomy, motion, rasterizer, palettes, serialization, export | .NET Standard 2.1 API, C# 9 (no engine types) |
 | `addons/procedural_creatures/Runtime/` | Godot layer: `CreatureActor` (Node2D), `CreatureRuntime` (registry/factory/preset I/O), `CreatureRenderQueue` | Core + Godot |
 | `addons/procedural_creatures_plantfolk/` | Example extension (its own family, shape block, palette rule, locomotion module) | public Core API only |
 | `workshop/` | Workshop application and test area | Runtime + Core |
 | `examples/minimal_integration/` | minimal game example | Runtime + Core only |
 | `tests/Core/` | engine-independent tests (run in the harness and in Godot) | Core |
 | `tests/*.cs` | Godot self-test, benchmark/soak test, batch tools | everything |
-| `tools/core_harness/` | console program, compiles **only** Core + Plantfolk Core + core tests | .NET 8 |
+| `tools/core_harness/` | console program, compiles **only** Core + Plantfolk Core + core tests; `unity-sync` mirrors them into the Unity package | .NET 8 |
+| `unity/com.proceduralpixel.creations/` | Unity package: mirrored Core/Plantfolk/tests, `PixelCreatureActor`, render queue, Creation Studio, baker | Core + Unity |
 
 The fact that the harness builds without any Godot reference and produces the same images as the
 game is ongoing proof that generation, animation and rasterization are engine-independent.
@@ -262,6 +263,45 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
 - Gallery thumbnails are capped at 400.
 - Leak and soak tests check nodes, orphan nodes, engine objects and managed memory
   (reports are written to the ignored `reports/` directory).
+
+## Unity runtime
+
+The Unity package compiles the identical core sources (mirrored by `CoreHarness unity-sync`, which
+also writes `.meta` files with GUIDs derived from the package path, so every sync is reproducible).
+The core therefore keeps to what Unity's compiler and runtimes accept:
+
+- **Language and API:** C# 9 and the .NET Standard 2.1 API profile: no `System.Text.Json` (the core has
+  its own `PixelCreatures.Core.Json` with the same output), no `ZLibStream`, `Math.ScaleB`,
+  `Encoding.Latin1` or default interface members; `init` accessors use a `IsExternalInit` shim.
+  Every core file enables nullable annotations itself (`#nullable enable`).
+- **Mono:** no `ReadOnlySpan<T>` indexing of static data (fails on Unity's Mono BCL); lookup tables are arrays.
+- **IL2CPP:** extensions are found by reflection, so `Runtime/link.xml` preserves the package
+  assemblies and an `IUnityLinkerProcessor` preserves every player assembly that references the core.
+  Dynamic assemblies and assemblies that cannot be inspected are skipped during discovery.
+- **Assemblies:** `PixelCreatures.Core` and `PixelCreatures.Plantfolk` have no engine references;
+  `PixelCreatures.Unity` (runtime), `PixelCreatures.Unity.Editor` and `PixelCreatures.Tests.Editor`
+  (edit mode tests, `testables`) build on them.
+
+Runtime behaviour mirrors the Godot layer:
+
+- **`PixelCreatureActor`** (`[ExecuteAlways]`, needs a `SpriteRenderer`): builds from a preset or
+  family + seed (on a worker thread in play mode, synchronously in edit mode and on WebGL), simulates
+  with the fixed time step, renders at `animationFps` and uploads into a point-filtered `Texture2D`
+  (rows flipped, Unity textures start at the bottom). The sprite pivot is the ground point and its
+  pixels per unit are `PixelsPerUnit * density`, so the world size is independent of the density.
+- **Coordinates:** ground pixels (x east, y south) map to world units on the XY plane; ground depth
+  is foreshortened by sin 30° (`PixelCreatureRuntime.GroundToWorld` / `WorldToGround`).
+- **Render queue:** actors enqueue in `Update`; a hidden driver flushes the queue in `LateUpdate`,
+  rasterizing all pending actors in parallel with thread-local renderers, then uploads on the main
+  thread. Unity objects are only touched on the main thread.
+- **Baking (editor):** `PixelCreatureBaker` renders the sprite sheet with `SpritesheetExporter`, stores
+  each page as a texture asset with `Sprite` sub-assets (pivot on the ground point), writes one
+  `AnimationClip` per clip and direction (sprite keyframes on `SpriteRenderer.m_Sprite`, frame
+  durations from the exporter) and an `AnimatorController` with one state per clip.
+- **Determinism:** bit-exact results are verified on .NET and Mono (`scripts/unity-check.sh` runs the
+  core suite with its golden values on Mono). IL2CPP compiles to C++, where a compiler that contracts
+  floating point operations could change single pixels; golden values are therefore only asserted on
+  Mono and .NET.
 
 ## Export
 

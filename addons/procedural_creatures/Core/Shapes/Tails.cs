@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - tail / chain shape blocks (tails, necks of long creatures, tentacles, antennae).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;

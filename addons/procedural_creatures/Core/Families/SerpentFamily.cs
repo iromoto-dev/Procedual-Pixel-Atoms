@@ -1,6 +1,8 @@
 // Procedural Pixel Creatures - family 6: serpents and worms (snakes, vipers, cobras, constrictors,
 // earthworms, sandworms). Legless bodies that follow the head's trail (serpentine locomotion).
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using PixelCreatures.Core.Anatomy;
