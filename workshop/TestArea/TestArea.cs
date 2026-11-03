@@ -3,6 +3,9 @@
 // of every family wandering around. Creatures outside the view keep moving but are not rasterized
 // (CreatureActor.CullOffscreen), so large maps with many creatures stay cheap.
 //
+// All actors render at classic pixel density (1): the map is drawn into a viewport with one pixel per world
+// unit that the zoom scales up, so HD sprites would cost four times the pixels only to be thinned out again.
+//
 // Scenery: by default the trees, bushes and rocks are flora and prop creations (stationary actors that
 // sway in the wind at a low animation rate, same pixel density as the creatures); the classic style shows
 // static textures instead. Scenery actors are culled like creatures, and outside the view (plus a margin)
@@ -45,6 +48,12 @@ namespace PixelCreatures.Workshop
         /// CullMargin, so an actor has always culled itself before it is put to sleep and wakes before it shows.
         /// </summary>
         public const float SceneryWakeMargin = 48;
+        /// <summary>
+        /// Pixel density of every actor in the test area (--density=N overrides it). Classic: the map is rendered into a
+        /// viewport with one pixel per world unit and scaled up by the zoom, so an HD sprite drawn at 1/density would be
+        /// rasterized at four times the pixels and then thinned out by nearest sampling.
+        /// </summary>
+        public const float DefaultPixelDensity = 1;
 
         private SubViewport _viewport = null!;
         private TextureRect _display = null!;
@@ -88,7 +97,7 @@ namespace PixelCreatures.Workshop
         private int _nextNpc;
         private PackedScene? _actorScene;
         private SceneryStyle _sceneryStyle = SceneryStyle.Procedural;
-        private float _density = (float)CreatureRuntime.DefaultDensity;
+        private float _density = DefaultPixelDensity;
         private readonly List<SceneryActor> _scenery = new List<SceneryActor>();
         /// <summary>Prop spots whose scenery actor is still to be created, nearest to the camera first.</summary>
         private readonly List<int> _sceneryQueue = new List<int>();

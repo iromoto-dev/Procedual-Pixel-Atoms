@@ -608,6 +608,9 @@ namespace PixelCreatures.Tests
             var scenery = area.SceneryActors().ToList();
             float density = area.Player!.PixelDensity;
             ctx.True(Math.Abs(density - area.PixelDensity) < 1e-6, "creatures use the test area's pixel density");
+            // the viewport shows one pixel per world unit: actors render one texel per viewport pixel, none thrown away
+            ctx.True(area.PixelDensity == TestArea.DefaultPixelDensity && area.AllActors().Concat(scenery).All(a => a.EffectiveDensity == 1 && a.DisplayScale == 1),
+                "test area actors render at classic density, one texel per viewport pixel");
             ctx.True(scenery.All(s => s.Model!.Anatomy.Rig.Stationary && s.CullOffscreen && s.AnimationFps >= 6 && s.AnimationFps <= 8 && Math.Abs(s.PixelDensity - density) < 1e-6),
                 "scenery: stationary creations, culled offscreen, 6-8 poses/s, the creatures' pixel density");
             ctx.True(!area.AllActors().Any(a => scenery.Contains(a)), "scenery is not part of the population");
