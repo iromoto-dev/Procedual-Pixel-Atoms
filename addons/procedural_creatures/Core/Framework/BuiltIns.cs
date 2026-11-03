@@ -31,6 +31,7 @@ namespace PixelCreatures.Core
             r.RegisterFamily(new AquaticFamily());
             r.RegisterFamily(new AmorphousFamily());
             r.RegisterFamily(new MythicalFamily());
+            r.RegisterFamily(new MonsterFamily());
             r.RegisterFamily(new FloraFamily());
             r.RegisterFamily(new PropFamily());
         }

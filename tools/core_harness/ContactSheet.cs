@@ -27,6 +27,8 @@ namespace PixelCreatures.Harness
             int dir = 7;
             foreach (var a in args) if (a.StartsWith("--dir=")) dir = int.Parse(a.Substring(6));
             double density = 1;
+            double action = -1;
+            foreach (var a in args) if (a.StartsWith("--action=")) action = double.Parse(a.Substring(9), System.Globalization.CultureInfo.InvariantCulture);
             foreach (var a in args) if (a.StartsWith("--density=")) density = double.Parse(a.Substring(10), System.Globalization.CultureInfo.InvariantCulture);
             ulong seed0 = 101;
             foreach (var a in args) if (a.StartsWith("--seed=")) seed0 = ulong.Parse(a.Substring(7));
@@ -79,7 +81,7 @@ namespace PixelCreatures.Harness
                 var row = new List<(byte[], int, int, int, int, string)>();
                 foreach (var m in models)
                 {
-                    var cell = RenderCell(reg, m, dir, walk, density);
+                    var cell = RenderCell(reg, m, dir, walk, density, action);
                     row.Add(cell);
                     // crop to content later; track maximum extents around the origin
                 }
@@ -134,7 +136,7 @@ namespace PixelCreatures.Harness
             return f.Archetypes[archRng.Weighted(weights)].Id;
         }
 
-        private static (byte[], int, int, int, int, string) RenderCell(CreatureRegistry reg, CreatureModel m, int dir, bool walk, double density)
+        private static (byte[], int, int, int, int, string) RenderCell(CreatureRegistry reg, CreatureModel m, int dir, bool walk, double density, double action = -1)
         {
             var motor = new CreatureMotor(m, reg);
             double yaw = PixelCamera.DirectionYaw(dir);
@@ -142,6 +144,12 @@ namespace PixelCreatures.Harness
             motor.FacingOverride = yaw;
             if (walk) motor.DesiredVelocity = new Vec3(DMath.Cos(yaw), 0, -DMath.Sin(yaw)) * m.Motion.WalkSpeed;
             for (int i = 0; i < 75; i++) motor.Step(FixedClock.DefaultStep);
+            if (action >= 0)
+            {
+                // trigger the action and capture it after 'action' seconds
+                motor.TriggerAction();
+                for (int i = 0; i < (int)Math.Round(action * 60); i++) motor.Step(FixedClock.DefaultStep);
+            }
             var c = m.Anatomy.Canvas.Scaled(density);
             var frame = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
             var view = ViewSpec.Default(motor.Yaw, density);
