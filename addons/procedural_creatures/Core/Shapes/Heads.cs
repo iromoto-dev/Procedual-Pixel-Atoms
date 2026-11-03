@@ -379,7 +379,7 @@ namespace PixelCreatures.Core.Shapes
                 p.Tag = s.Name + "." + tag;
                 p.Flags |= PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
                 p.ShadeBias = shade;
-                return b.Defer(p);
+                return p;
             }
             // culmen: the keel of the upper mandible catches the light as a narrow ridge
             Vec3 c0 = snoutBase + up * (snoutR0 * 0.62) + dir * (snoutR0 * 0.2);
@@ -423,7 +423,6 @@ namespace PixelCreatures.Core.Shapes
                     p.DomainLength = total;
                     p.MinDensity = Limbs.HdDensity;
                     p.Tag = s.Name + ".scale";
-                    b.Defer(p);
                 }
             }
         }
@@ -475,7 +474,6 @@ namespace PixelCreatures.Core.Shapes
                     p.DomainLength = total;
                     p.MinDensity = Limbs.HdDensity;
                     p.Tag = s.Name + (p == pit ? ".heatpit" : ".nostril");
-                    b.Defer(p);
                 }
             }
         }

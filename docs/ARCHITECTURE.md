@@ -182,7 +182,7 @@ layers: breast plumage for birds; gill slits or gill covers, the lateral line an
 ventral scale bands for snakes and annulus grooves for worms; gloss, sparkle and bubbles for slimes and
 suckers on tentacles.
 
-Three tools keep this cheap and safe:
+Two tools keep this cheap:
 
 - `AnatomyBuilder.HdSwap(classic, density)` hides a classic primitive from the given density on and appends
   an identical copy that is only drawn from it, so the HD copy can take an HD-only surface treatment while
@@ -192,9 +192,13 @@ Three tools keep this cheap and safe:
   shade darker), `PrimFlags.Annuli` ring grooves along the part. Because they live in the host surface's
   coordinates, patterns, countershading and silhouettes are unaffected. Separate small detail primitives
   cannot do that: each evaluates patterns in its own frame.
-- `AnatomyBuilder.Defer(detail)` moves a detail primitive created in the middle of a build behind every
-  other primitive. Primitive indices seed faceted shading (stone and crystal materials, `Faceted` and
-  `Scutes` without a `FacetSeed`), so detail added mid-build must not take the index of a classic primitive.
+
+Detail may be added anywhere in a build. Nothing in a classic render depends on it: detail primitives are
+skipped before preparation, and seeded shading (faceted stone and crystal materials, `Faceted` and `Scutes`
+without a `FacetSeed`) is seeded by a primitive's index among the classic primitives only, with detail
+counted in a separate range. The test `render.hd_detail_never_changes_classic` checks this for every family,
+including forced stone and crystal materials, by comparing each classic render with the render of the same
+anatomy stripped of all detail.
 
 ## Animation
 

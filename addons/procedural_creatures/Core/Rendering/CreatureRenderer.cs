@@ -63,6 +63,11 @@ namespace PixelCreatures.Core.Rendering
             public PatternDomain Domain;
             public double U0, U1, DomainLength;
             public uint FacetSeed;
+            /// <summary>
+            /// Seed of faceted shading and scute layouts: FacetSeed, or derived from the primitive's index among the
+            /// classic primitives (high density detail counts separately), so detail never reseeds a classic sprite.
+            /// </summary>
+            public uint Seed;
             /// <summary>Scallop cell / annulus size in pixels (PrimFlags.Scallops, PrimFlags.Annuli).</summary>
             public double DetailSize;
             public bool Hard;
@@ -290,13 +295,20 @@ namespace PixelCreatures.Core.Rendering
 
         // ------------------------------------------------------------------ primitive preparation
 
+        /// <summary>First facet seed index of high density detail primitives (classic primitives count from 0).</summary>
+        private const int DetailSeedBase = 1 << 16;
+
         private void PreparePrimitives(CreatureAnatomy anatomy, SurfaceSpec surface, int quality, ref RenderStats stats)
         {
             var prims = anatomy.Primitives;
             _ppCount = 0;
+            int classicIndex = 0, detailIndex = 0;
             for (int i = 0; i < prims.Count; i++)
             {
                 var d = prims[i];
+                // seed index: position among the classic primitives, or among the high density detail (in its own
+                // range); counted before any skipping so it depends on neither density nor quality
+                int seedIndex = d.MinDensity > 1.0 ? DetailSeedBase + detailIndex++ : classicIndex++;
                 if (d.MinQuality > quality || d.MinDensity > _s + 1e-9 || (d.MaxDensity > 0 && _s >= d.MaxDensity - 1e-9)) continue;
                 ref var p = ref _pp[_ppCount];
                 p = default;
@@ -312,6 +324,7 @@ namespace PixelCreatures.Core.Rendering
                 p.U1 = d.U1;
                 p.DomainLength = d.DomainLength * _s;
                 p.FacetSeed = d.FacetSeed;
+                p.Seed = d.FacetSeed != 0 ? d.FacetSeed : (uint)(seedIndex * 2654435761u);
                 p.DetailSize = d.DetailSize * _s;
                 p.Hard = (d.Flags & PrimFlags.Hard) != 0;
                 bool ok;
@@ -1232,7 +1245,7 @@ namespace PixelCreatures.Core.Rendering
             Vec3 q = sp.Local;
             if (q.Y < -0.25) return 0;               // underside / rim: no plates
             const double cells = 2.3;                // plates per unit radius
-            uint seed = p.FacetSeed == 0 ? (uint)(p.Source * 2654435761u) : p.FacetSeed;
+            uint seed = p.Seed;
             double gx = q.X * cells, gz = q.Z * cells * 1.15;
             int cx = (int)Math.Floor(gx), cz = (int)Math.Floor(gz);
             double f1 = 1e9, f2 = 1e9;
@@ -1290,7 +1303,7 @@ namespace PixelCreatures.Core.Rendering
         private Vec3 FacetNormal(ref PPrim p, Vec3 n)
         {
             // snap the normal to one of a few seeded facet directions per primitive -> chiselled planes
-            uint seed = p.FacetSeed == 0 ? (uint)(p.Source * 2654435761u) : p.FacetSeed;
+            uint seed = p.Seed;
             Vec3 best = n;
             double bestDot = -2;
             for (int k = 0; k < 7; k++)

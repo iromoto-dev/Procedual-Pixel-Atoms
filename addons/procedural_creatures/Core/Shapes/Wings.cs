@@ -292,7 +292,6 @@ namespace PixelCreatures.Core.Shapes
                     tri.DomainLength = s.Span;
                     tri.MinDensity = Limbs.HdDensity;
                     tri.Tag = N(s, side, "covert");
-                    b.Defer(tri);
                 }
             }
         }

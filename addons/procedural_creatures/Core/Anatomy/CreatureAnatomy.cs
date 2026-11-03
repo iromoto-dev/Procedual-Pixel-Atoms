@@ -45,7 +45,6 @@ namespace PixelCreatures.Core.Anatomy
         private readonly List<BoneDef> _bones = new List<BoneDef>();
         private readonly List<PartGroup> _groups = new List<PartGroup>();
         private readonly List<PrimitiveDef> _prims = new List<PrimitiveDef>();
-        private readonly List<PrimitiveDef> _deferred = new List<PrimitiveDef>();
         private readonly List<FeatureDef> _features = new List<FeatureDef>();
         private readonly List<string> _repairs = new List<string>();
         private readonly List<string> _traits = new List<string>();
@@ -213,23 +212,9 @@ namespace PixelCreatures.Core.Anatomy
         }
 
         /// <summary>
-        /// Moves a high density detail primitive behind every other primitive (it is appended at Build()). Shape blocks
-        /// that add detail in the middle of a build use this, so the detail never takes the index of a classic
-        /// primitive: primitive indices seed faceted shading (stone, crystal), and classic sprites must not change.
-        /// </summary>
-        public PrimitiveDef Defer(PrimitiveDef detail)
-        {
-            int i = _prims.LastIndexOf(detail);
-            if (i >= 0) _prims.RemoveAt(i);
-            _deferred.Add(detail);
-            return detail;
-        }
-
-        /// <summary>
         /// Level of detail swap: the classic primitive is drawn only below the given pixel density and an identical
         /// copy (returned, e.g. to receive PrimFlags.Scallops) only from that density on. Geometry, group and pattern
-        /// mapping stay the same, so the swap changes nothing but the high density surface treatment. The copy is
-        /// deferred like other detail.
+        /// mapping stay the same, so the swap changes nothing but the high density surface treatment.
         /// </summary>
         public PrimitiveDef HdSwap(PrimitiveDef classic, double density)
         {
@@ -237,7 +222,7 @@ namespace PixelCreatures.Core.Anatomy
             classic.MaxDensity = density;
             copy.MinDensity = density;
             copy.MaxDensity = 0;
-            _deferred.Add(copy);
+            _prims.Add(copy);
             return copy;
         }
 
@@ -251,8 +236,6 @@ namespace PixelCreatures.Core.Anatomy
 
         public CreatureAnatomy Build(ulong anatomyKey)
         {
-            _prims.AddRange(_deferred);
-            _deferred.Clear();
             var skeleton = new Skeleton(_bones);
             ValidateAndRepair(skeleton);
             var canvas = ComputeCanvas(skeleton);

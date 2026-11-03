@@ -32,6 +32,7 @@ namespace PixelCreatures.Tests
             r.Run("genetics.regenerate_respects_locks", ctx => RegenerateTests(ctx, registry));
             r.Run($"anatomy.valid_for_{seedsPerFamily}_seeds_per_family", ctx => AnatomyValidity(ctx, registry, factory, seedsPerFamily));
             r.Run("render.deterministic_and_golden", ctx => RenderDeterminism(ctx, registry, factory));
+            r.Run("render.hd_detail_never_changes_classic", ctx => HdDetailKeepsClassic(ctx, registry, factory, Math.Min(seedsPerFamily, 12)));
             r.Run("motion.framerate_independent", ctx => MotionFramerateIndependence(ctx, registry, factory));
             r.Run("motion.planted_feet_do_not_slide", ctx => FootSliding(ctx, registry, factory));
             r.Run("motion.states_and_directions_stay_in_canvas", ctx => CanvasSafety(ctx, registry, factory));
@@ -392,6 +393,52 @@ namespace PixelCreatures.Tests
                 for (int i = 0; i < 90; i++) motor.Step(FixedClock.DefaultStep);
                 yield return ($"{f.Id}:walk", RenderHash(m, motor.Pose, motor.Yaw));
             }
+        }
+
+        /// <summary>
+        /// High density detail (MinDensity above 1) must not change classic sprites. For every family, with its own
+        /// material and with every faceted material it offers (stone, crystal: their shading is seeded per primitive),
+        /// the classic render of an anatomy must equal the render of the same anatomy stripped of all detail
+        /// primitives and features, whatever the position of the detail in the primitive list.
+        /// </summary>
+        private static void HdDetailKeepsClassic(TestContext ctx, CreatureRegistry reg, CreatureFactory factory, int seeds)
+        {
+            int compared = 0, faceted = 0;
+            foreach (var f in reg.Families)
+            {
+                var materials = new List<string> { string.Empty };
+                if (f.Schema.Contains("surface.material"))
+                    foreach (var o in f.Schema.Get("surface.material").Options)
+                        if (o.Id == "stone" || o.Id == "crystal") materials.Add(o.Id);
+                for (int s = 0; s < seeds; s++)
+                {
+                    ulong seed = (ulong)(3100 + s * 7919);
+                    var sampled = GenomeFactory.Sample(f, seed);
+                    foreach (string material in materials)
+                    {
+                        var m = factory.Build(material.Length == 0 ? sampled : sampled.WithChoice("surface.material", material));
+                        var a = m.Anatomy;
+                        var prims = a.Primitives.Where(p => p.MinDensity <= 1.0).ToList();
+                        var features = a.Features.Where(ft => ft.MinDensity <= 1.0).ToList();
+                        if (prims.Count == a.Primitives.Count && features.Count == a.Features.Count) continue;
+                        var bare = new CreatureAnatomy(a.FamilyId, a.Skeleton, a.Groups.ToList(), prims, features, a.Rig, a.Metrics, a.Canvas,
+                            a.Repairs.ToList(), a.Traits.ToList(), a.AnatomyKey);
+                        var bareModel = new CreatureModel(m.Genome, m.Family, bare, m.Palette, m.Surface, m.Motion, m.Warnings);
+                        var pose = new CreaturePose(a.Skeleton);
+                        foreach (int dir in new[] { 7, 3 })
+                        {
+                            double yaw = PixelCamera.DirectionYaw(dir);
+                            ctx.Equal(RenderHash(bareModel, pose, yaw), RenderHash(m, pose, yaw),
+                                $"{f.Id} seed {seed}{(material.Length > 0 ? " " + material : "")} direction {dir}: classic render with high density detail");
+                        }
+                        compared++;
+                        if (material.Length > 0) faceted++;
+                    }
+                }
+            }
+            ctx.True(compared > 0, "no creature carries high density detail");
+            ctx.Metric("creatures", compared);
+            ctx.Metric("facetedCreatures", faceted);
         }
 
         private static void RenderDeterminism(TestContext ctx, CreatureRegistry reg, CreatureFactory factory)
@@ -758,7 +805,7 @@ namespace PixelCreatures.Tests
             ["arthropod:walk"] = 0xa4df8330c029a0a1UL,
             ["winged:genome"] = 0x773625d175b173b9UL,
             ["winged"] = 0x1ddf0f2d627a3dc8UL,
-            ["winged:hd"] = 0xa6b62473ddb52a50UL,
+            ["winged:hd"] = 0x6eff0a20ab09667fUL,
             ["winged:walk"] = 0xd1ba207325472d3fUL,
             ["serpent:genome"] = 0xb6bd6dcb29822ee6UL,
             ["serpent"] = 0x76e6faaf990bc548UL,

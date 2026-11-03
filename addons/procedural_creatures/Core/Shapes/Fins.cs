@@ -161,7 +161,7 @@ namespace PixelCreatures.Core.Shapes
             }
         }
 
-        /// <summary>One high density fin ray between two bones (thin, hard, a shade darker than the membrane; deferred behind all classic primitives).</summary>
+        /// <summary>One high density fin ray between two bones (thin, hard, a shade darker than the membrane).</summary>
         public static PrimitiveDef Ray(AnatomyBuilder b, int group, int boneA, Vec3 a, int boneB, Vec3 c, MaterialSlot material, int side, string name)
         {
             var r = b.Cone(group, boneA, a, 0.46, boneB, c, 0.4, material, PatternDomain.None, 0, 1, side);
@@ -169,7 +169,7 @@ namespace PixelCreatures.Core.Shapes
             r.ShadeBias = -1;
             r.MinDensity = Limbs.HdDensity;
             r.Tag = name + ".ray";
-            return b.Defer(r);
+            return r;
         }
 
         /// <summary>Rotation that maps the ellipsoid's local Z (width) onto the given in-plane direction.</summary>

@@ -458,14 +458,14 @@ namespace PixelCreatures.Core.Shapes
             // ankle bone frame: +X runs down the tarsus to the foot
             var tarsus = b.Cone(group, ankle, Vec3.Zero, ra * 1.06, ankle, new Vec3(l3, 0, 0), rf * 1.06, s.FootMaterial, PatternDomain.Limb, 0.8, 0.95, s.Side);
             tarsus.DomainLength = len;
-            b.Defer(Hd(tarsus, s.Name + ".tarsus"));
+            Hd(tarsus, s.Name + ".tarsus");
             if (feathered > 0.05)
             {
                 // trousers: a feathered sleeve from the ankle down, flaring a little at its lower rim
                 double end = l3 * DMath.Lerp(0.35, 1.0, feathered);
                 var sleeve = b.Cone(group, ankle, new Vec3(-ra * 0.2, 0, 0), ra * 1.3, ankle, new Vec3(end, 0, 0), DMath.Lerp(ra, rf, end / l3) * 1.4, s.Material, PatternDomain.Limb, 0.75, 0.9, s.Side);
                 sleeve.DomainLength = len;
-                b.Defer(Hd(sleeve, s.Name + ".trousers"));
+                Hd(sleeve, s.Name + ".trousers");
             }
             // scutes: thin, slightly darker rings down the bare part of the tarsus
             double spacing = Math.Max(1.1, ra * 0.95);
@@ -476,7 +476,7 @@ namespace PixelCreatures.Core.Shapes
                 var ring = b.Ellipsoid(group, ankle, new Vec3(x, 0, 0), new Vec3(Math.Max(0.38, spacing * 0.22), r * 1.2, r * 1.2), s.FootMaterial, PatternDomain.None, 0, 1, null, s.Side);
                 ring.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
                 ring.ShadeBias = -1;
-                b.Defer(Hd(ring, s.Name + ".scute"));
+                Hd(ring, s.Name + ".scute");
             }
             // anisodactyl foot (foot bone frame: +X creature forward, +Y up): three toes fan forward, the
             // hallux points back; all of them rest on the ground and end in a talon
@@ -492,7 +492,7 @@ namespace PixelCreatures.Core.Shapes
                 Vec3 tip = new Vec3(DMath.Cos(a) * tl, -sole + r1 + 0.05, DMath.Sin(a) * tl);
                 var toe = b.Cone(group, foot, heel, r0, foot, tip, r1, s.FootMaterial, PatternDomain.Limb, 0.97, 1.0, s.Side);
                 toe.DomainLength = len;
-                b.Defer(Hd(toe, s.Name + (hallux ? ".hallux" : ".toe")));
+                Hd(toe, s.Name + (hallux ? ".hallux" : ".toe"));
                 if (s.Claws > 0 && s.ClawSize > 0.2)
                 {
                     Vec3 dir = new Vec3(DMath.Cos(a), 0, DMath.Sin(a));
@@ -500,7 +500,7 @@ namespace PixelCreatures.Core.Shapes
                     var claw = b.Cone(group, foot, tip - dir * (r1 * 0.3), Math.Max(0.32, s.ClawSize * 0.32), foot, talon, 0.26, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
                     claw.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
                     claw.ShadeBias = -2;
-                    b.Defer(Hd(claw, s.Name + ".talon"));
+                    Hd(claw, s.Name + ".talon");
                 }
             }
         }
