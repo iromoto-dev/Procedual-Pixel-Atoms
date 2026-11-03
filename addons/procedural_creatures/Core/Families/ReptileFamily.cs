@@ -295,6 +295,30 @@ namespace PixelCreatures.Core.Families
             mid.DomainLength = dom; mid.Tag = "barrel";
             var chestP = b.Ellipsoid(body, chest, new Vec3(chestR * 0.05, 0, 0), new Vec3(chestR * 1.15, chestR * 0.92, chestR * wz * 0.92), MaterialSlot.Primary, PatternDomain.Body, 0.7, 1.0);
             chestP.DomainLength = dom; chestP.Tag = "chest";
+            if (!shell)
+            {
+                // high density: paired rows of keeled scutes along the back (osteoderms); their own group
+                // so every scute gets a contour and reads as a stud
+                int sg = b.Group("scutes", 0.35, 0, GroupFlags.CreaseShade, 0.05);
+                int n = DMath.Clamp((int)Math.Round(L / Math.Max(2.2, R * 0.55)), 4, 14);
+                for (int i = 0; i < n; i++)
+                {
+                    double t = (i + 0.5) / n;
+                    double x = DMath.Lerp(P.X - hipR * 0.6, C.X + chestR * 0.45, t);
+                    double top = DMath.Lerp(P.Y + hipR * 0.8, C.Y + chestR * 0.86, t) + R * 0.02;
+                    int bone = t < 0.33 ? pelvis : (t < 0.66 ? spine : chest);
+                    var bx = b.RestWorld(bone);
+                    double sr = R * DMath.Lerp(0.14, 0.2, Math.Sin(DMath.Pi * t));
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        Vec3 w = new Vec3(x, top - sr * 0.3, side * R * wz * 0.28);
+                        var sc = b.Ellipsoid(sg, bone, bx.InversePoint(w), new Vec3(sr * 1.2, sr * 0.6, sr * 0.8), MaterialSlot.Primary, PatternDomain.Body, t * 0.9, t * 0.9 + 0.05);
+                        sc.DomainLength = dom;
+                        sc.MinDensity = Limbs.HdDensity;
+                        sc.Tag = "scute";
+                    }
+                }
+            }
 
             // ---- neck & head
             double neckLen = baseL * DMath.Lerp(0.08, 0.7, g.Get("neck.length"));

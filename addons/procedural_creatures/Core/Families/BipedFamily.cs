@@ -469,6 +469,29 @@ namespace PixelCreatures.Core.Families
                 hump.DomainLength = dom; hump.Tag = "hump";
             }
             if (golem) foreach (var prim in new[] { hips, bel, chestP }) { prim.Flags |= PrimFlags.Faceted; prim.FacetSeed = (uint)(g.AnatomySeed & 0xFFFFFF) + (uint)prim.Tag.Length; }
+            string bareOutfit = g.GetChoice("gear.outfit");
+            if (!golem && (bareOutfit == "none" || bareOutfit == "loincloth" || bareOutfit == "belt"))
+            {
+                // high density musculature on bare torsos: pectorals, trapezius and (lean bellies) abdominals
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var pec = b.Ellipsoid(body, chest, new Vec3(-chestR * 0.35, -chestR * 0.5, side * shoulderW * 0.42), new Vec3(chestR * 0.5, chestR * 0.34, shoulderW * 0.44),
+                        MaterialSlot.Primary, PatternDomain.Body, 0.75, 0.9, null, side);
+                    pec.MinDensity = Limbs.HdDensity; pec.DomainLength = dom; pec.Tag = "pectoral";
+                    var trap = b.Ellipsoid(body, chest, new Vec3(chestR * 0.2, chestR * 0.3, side * shoulderW * 0.5), new Vec3(chestR * 0.45, chestR * 0.42, shoulderW * 0.38),
+                        MaterialSlot.Primary, PatternDomain.Body, 0.85, 1.0, null, side);
+                    trap.MinDensity = Limbs.HdDensity; trap.DomainLength = dom; trap.Tag = "trapezius";
+                }
+                if (belly < 0.5)
+                {
+                    for (int k = 0; k < 3; k++)
+                    {
+                        var ab = b.Ellipsoid(body, spine, new Vec3(-torsoH * (0.28 - 0.14 * k), -bellyR * 0.82, 0), new Vec3(torsoH * 0.08, bellyR * 0.22, bellyR * 0.42),
+                            MaterialSlot.Primary, PatternDomain.Body, 0.35, 0.6);
+                        ab.MinDensity = Limbs.HdDensity; ab.DomainLength = dom; ab.Tag = "abs";
+                    }
+                }
+            }
 
             // ---- neck and head
             double headSize = g.Get("head.size");

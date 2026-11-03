@@ -360,12 +360,12 @@ namespace PixelCreatures.Tests
             ctx.Metric("maxCanvasH", maxH);
         }
 
-        public static ulong RenderHash(CreatureModel m, CreaturePose pose, double yaw)
+        public static ulong RenderHash(CreatureModel m, CreaturePose pose, double yaw, double density = 1)
         {
             var r = new CreatureRenderer();
-            var c = m.Anatomy.Canvas;
+            var c = m.Anatomy.Canvas.Scaled(density);
             var f = new PixelFrame(c.Width, c.Height) { OriginX = c.OriginX, OriginY = c.OriginY };
-            r.Render(m.Anatomy, m.Palette, m.Surface, pose, ViewSpec.Default(yaw), f);
+            r.Render(m.Anatomy, m.Palette, m.Surface, pose, ViewSpec.Default(yaw, density), f);
             return f.ContentHash();
         }
 
@@ -382,6 +382,8 @@ namespace PixelCreatures.Tests
                 var m = factory.Build(g);
                 yield return ($"{f.Id}:genome", g.ContentHash);
                 yield return (f.Id, RenderHash(m, new CreaturePose(m.Anatomy.Skeleton), PixelCamera.DirectionYaw(7)));
+                // the HD path (pixel density 2 with high density anatomy) is pinned as well
+                yield return ($"{f.Id}:hd", RenderHash(m, new CreaturePose(m.Anatomy.Skeleton), PixelCamera.DirectionYaw(7), CreatureFramework.HdDensity));
                 var motor = new CreatureMotor(m, reg);
                 double yaw = PixelCamera.DirectionYaw(7);
                 motor.Teleport(Vec3.Zero, yaw);
@@ -740,31 +742,56 @@ namespace PixelCreatures.Tests
         {
             ["quadruped:genome"] = 0xb347eafec5ed47edUL,
             ["quadruped"] = 0xc24f96a97be5a1f5UL,
+            ["quadruped:hd"] = 0x64e8e8ad7de7b9efUL,
             ["quadruped:walk"] = 0x37257c62ce5e5420UL,
             ["biped:genome"] = 0x5ef08293f551f95aUL,
             ["biped"] = 0x9d5f6ba037ea81f1UL,
+            ["biped:hd"] = 0x4522d5dff5003069UL,
             ["biped:walk"] = 0x5f13d3534d41b54fUL,
             ["reptile:genome"] = 0x53993ac7a73b23b3UL,
             ["reptile"] = 0x5207d3574a0a7b7bUL,
+            ["reptile:hd"] = 0x2bf9f9508b0d4873UL,
             ["reptile:walk"] = 0x56604dac7c734731UL,
             ["arthropod:genome"] = 0x17a527c0f16e660eUL,
             ["arthropod"] = 0x653189d69a32ee55UL,
+            ["arthropod:hd"] = 0xeab2c1865c61e5d5UL,
             ["arthropod:walk"] = 0xa4df8330c029a0a1UL,
             ["winged:genome"] = 0x773625d175b173b9UL,
             ["winged"] = 0x1ddf0f2d627a3dc8UL,
+            ["winged:hd"] = 0xaab178d09b037b4aUL,
             ["winged:walk"] = 0xd1ba207325472d3fUL,
             ["serpent:genome"] = 0xb6bd6dcb29822ee6UL,
             ["serpent"] = 0x76e6faaf990bc548UL,
+            ["serpent:hd"] = 0x5f54e5c78bcd9547UL,
             ["serpent:walk"] = 0x228b7ca9a57b9021UL,
             ["aquatic:genome"] = 0x44b268859a62d96fUL,
             ["aquatic"] = 0xd8ea4b1e8583f131UL,
+            ["aquatic:hd"] = 0xadaa62a0af5c90fdUL,
             ["aquatic:walk"] = 0x52c411ea737c831eUL,
             ["amorphous:genome"] = 0x96fa889d3f873a1eUL,
             ["amorphous"] = 0x29545e9a6eb3f823UL,
+            ["amorphous:hd"] = 0xa71e7a4b75852f93UL,
             ["amorphous:walk"] = 0x62f57528386e2cbbUL,
+            ["mythical:genome"] = 0xbcbaecd93437f83cUL,
+            ["mythical"] = 0xd0fa3a771cc60eb5UL,
+            ["mythical:hd"] = 0x76436701da97de94UL,
+            ["mythical:walk"] = 0x32f26b862782e23bUL,
+            ["monster:genome"] = 0x07a80d7f762120e3UL,
+            ["monster"] = 0x8a3f0ca4a5b9e468UL,
+            ["monster:hd"] = 0xd1931dc29e9e3e66UL,
+            ["monster:walk"] = 0x658b33ddabd8772aUL,
             ["plantfolk:genome"] = 0x5e86703c03aa3251UL,
             ["plantfolk"] = 0x0365c2d8cc0518cbUL,
+            ["plantfolk:hd"] = 0x1612d9af113af59aUL,
             ["plantfolk:walk"] = 0xacc0ea74aee3ec28UL,
+            ["flora:genome"] = 0xd708d6ef4c122d91UL,
+            ["flora"] = 0x6fc6748d2501495eUL,
+            ["flora:hd"] = 0x4d6ef30baf4f75e0UL,
+            ["flora:walk"] = 0xf554ed01d02460deUL,
+            ["prop:genome"] = 0x2ec4d72d44ffa414UL,
+            ["prop"] = 0x5b1ccd5f0e219b9eUL,
+            ["prop:hd"] = 0xbfc9e0794ced2eb2UL,
+            ["prop:walk"] = 0x441e784d8ef20b5bUL,
         };
     }
 }

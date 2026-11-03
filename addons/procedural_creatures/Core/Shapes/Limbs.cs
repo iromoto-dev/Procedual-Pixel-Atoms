@@ -309,6 +309,38 @@ namespace PixelCreatures.Core.Shapes
                     Hd(hock, s.Name + ".hock");
                 }
             }
+            if (arthropod)
+            {
+                // chitin joints: darker, slightly wider rings at the knee and ankle; bristles on the lower segments
+                foreach (var (bone, r) in new[] { (knee, s.RadiusKnee), (ankle, s.RadiusAnkle) })
+                {
+                    var ring = b.Ellipsoid(group, bone, new Vec3(0.15, 0, 0), new Vec3(Math.Max(0.45, r * 0.45), r * 1.18, r * 1.18), mat, PatternDomain.Limb, 0, 1, null, s.Side);
+                    ring.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                    ring.ShadeBias = -1;
+                    Hd(ring, s.Name + ".joint");
+                }
+                int bristles = 3;
+                for (int k = 0; k < bristles; k++)
+                {
+                    double t = (k + 0.6) / (bristles + 0.4);
+                    Vec3 at = new Vec3(l2 * t, 0, 0);
+                    double r = DMath.Lerp(s.RadiusKnee, s.RadiusAnkle, t);
+                    Vec3 tip = at + new Vec3(r * 0.4, -r * 1.6 - 0.6, (k % 2 == 0 ? 1 : -1) * r * 0.6);
+                    var hair = b.Cone(group, knee, at + new Vec3(0, -r * 0.6, 0), 0.32, knee, tip, 0.25, MaterialSlot.Marking, PatternDomain.None, 0, 1, s.Side);
+                    hair.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard | PrimFlags.NoShadow;
+                    Hd(hair, s.Name + ".bristle");
+                }
+                for (int k = 0; k < 2; k++)
+                {
+                    double t = (k + 1) / 3.0;
+                    double r = DMath.Lerp(s.RadiusAnkle, Math.Max(0.45, s.RadiusFoot * 0.6), t);
+                    Vec3 at = new Vec3(l3 * t, -r * 0.5, 0);
+                    var spine = b.Cone(group, ankle, at, 0.3, ankle, at + new Vec3(r * 0.2 + 0.4, -r * 1.2 - 0.5, 0), 0.22, MaterialSlot.Marking, PatternDomain.None, 0, 1, s.Side);
+                    spine.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard | PrimFlags.NoShadow;
+                    Hd(spine, s.Name + ".spine");
+                }
+                return;
+            }
             if (s.IsArm || s.Hand) return;
 
             if (s.Style == LegStyle.Unguligrade)
