@@ -3,8 +3,11 @@
 // of every family wandering around. Creatures outside the view keep moving but are not rasterized
 // (CreatureActor.CullOffscreen), so large maps with many creatures stay cheap.
 //
-// All actors render at classic pixel density (1): the map is drawn into a viewport with one pixel per world
-// unit that the zoom scales up, so HD sprites would cost four times the pixels only to be thinned out again.
+// HD: actors render at pixel density 2 and the map view renders two pixels per map unit (camera zoom), so
+// every sprite texel is one view pixel and HD detail and outlines survive. The zoom magnifies that view by
+// whole numbers - 2, 4, 6 or 8 screen pixels per map unit - so pixels stay crisp; ground and terrain
+// textures have one texel per map unit and appear twice as coarse as the sprites. --density=1 renders
+// classic sprites with zoom steps of 1 to 8 screen pixels per map unit.
 //
 // Scenery: by default the trees, bushes and rocks are flora and prop creations (stationary actors that
 // sway in the wind at a low animation rate, same pixel density as the creatures); the classic style shows
@@ -17,7 +20,8 @@
 // F = camera follows again, M = minimap, PageUp/PageDown = map size, N = new map, P = procedural or
 // classic scenery, +/- = population, F1 = overlay, Esc = back to the workshop.
 //
-// Command line (after "--"): --testarea [--population=1..100] [--map=0..4] [--map-seed=N] [--zoom=1..8]
+// Command line (after "--"): --testarea [--population=1..100] [--map=0..4] [--map-seed=N]
+//                            [--zoom=1..8 (screen pixels per map unit, nearest step)]
 //                            [--scenery=procedural|classic] [--density=1..4]
 
 using System;
@@ -49,11 +53,14 @@ namespace PixelCreatures.Workshop
         /// </summary>
         public const float SceneryWakeMargin = 48;
         /// <summary>
-        /// Pixel density of every actor in the test area (--density=N overrides it). Classic: the map is rendered into a
-        /// viewport with one pixel per world unit and scaled up by the zoom, so an HD sprite drawn at 1/density would be
-        /// rasterized at four times the pixels and then thinned out by nearest sampling.
+        /// Pixel density of every actor in the test area, and pixels per map unit of the map view (--density=N overrides
+        /// it). HD: the view matches the sprites, so each texel is one view pixel instead of being thinned out.
         /// </summary>
-        public const float DefaultPixelDensity = 1;
+        public const int DefaultPixelDensity = 2;
+        /// <summary>Screen pixels per map unit at the default zoom (rounded to the nearest step of the density).</summary>
+        private const int DefaultUnitPixels = 3;
+        /// <summary>Screen pixels per map unit at the largest zoom.</summary>
+        private const int MaxUnitPixels = 8;
 
         private SubViewport _viewport = null!;
         private TextureRect _display = null!;
@@ -86,7 +93,8 @@ namespace PixelCreatures.Workshop
         private Button _minimapButton = null!;
         private PanelContainer _overlay = null!;
         private TestAreaMinimap _minimap = null!;
-        private int _zoom = 3;
+        /// <summary>Screen pixels per view pixel; one map unit is _zoom * _density screen pixels.</summary>
+        private int _zoom = 1;
         private bool _follow = true;
         private bool _dragging;
         private Vector2 _cameraPos;
@@ -97,7 +105,7 @@ namespace PixelCreatures.Workshop
         private int _nextNpc;
         private PackedScene? _actorScene;
         private SceneryStyle _sceneryStyle = SceneryStyle.Procedural;
-        private float _density = DefaultPixelDensity;
+        private int _density = DefaultPixelDensity;
         private readonly List<SceneryActor> _scenery = new List<SceneryActor>();
         /// <summary>Prop spots whose scenery actor is still to be created, nearest to the camera first.</summary>
         private readonly List<int> _sceneryQueue = new List<int>();
@@ -134,7 +142,11 @@ namespace PixelCreatures.Workshop
         public int TargetPopulation => _targetPopulation;
         public int CreatureCount => _npcs.Count + (_player != null ? 1 : 0);
         public int VisibleCreatureCount => AllActors().Count(a => !a.IsCulled);
+        /// <summary>Zoom step: screen pixels per view pixel (1..MaxZoom). A map unit is Zoom * PixelDensity screen pixels.</summary>
         public int Zoom => _zoom;
+        public int MaxZoom => Math.Max(1, MaxUnitPixels / _density);
+        /// <summary>Screen pixels per map unit.</summary>
+        public int UnitPixels => _zoom * _density;
         public bool CameraFollows => _follow;
         public bool MinimapVisible => _minimap.Visible;
         public bool OverlayVisible => _overlay.Visible;
@@ -144,10 +156,13 @@ namespace PixelCreatures.Workshop
         {
             get
             {
-                var size = (Vector2)_viewport.Size;
+                var size = ViewSize;
                 return new Rect2(_camera.Position - size / 2, size);
             }
         }
+
+        /// <summary>Size of the view in map units (the viewport renders PixelDensity pixels per map unit).</summary>
+        private Vector2 ViewSize => (Vector2)_viewport.Size / _density;
 
         public IEnumerable<CreatureActor> AllActors()
         {
@@ -159,7 +174,7 @@ namespace PixelCreatures.Workshop
 
         /// <summary>Procedural scenery (flora and prop actors) or classic static textures.</summary>
         public SceneryStyle SceneryStyle => _sceneryStyle;
-        /// <summary>Pixel density of every actor in the test area: creatures and scenery match.</summary>
+        /// <summary>Pixel density of every actor in the test area (creatures and scenery match) and pixels per map unit of the view.</summary>
         public float PixelDensity => _density;
         /// <summary>The flora and prop actors of the current map (creatures are not included).</summary>
         public IEnumerable<CreatureActor> SceneryActors() => _scenery.Select(s => s.Actor);
@@ -215,16 +230,19 @@ namespace PixelCreatures.Workshop
             _camera.MakeCurrent();
 
             var args = OS.GetCmdlineUserArgs();
-            int population = 10;
+            int population = 10, unitPixels = DefaultUnitPixels;
             foreach (var a in args)
             {
                 if (a.StartsWith("--population=") && int.TryParse(a.Substring(13), out int p)) population = p;
                 else if (a.StartsWith("--map=") && int.TryParse(a.Substring(6), out int m)) _mapIndex = Math.Clamp(m, 0, MapSize.All.Length - 1);
                 else if (a.StartsWith("--map-seed=") && ulong.TryParse(a.Substring(11), out ulong s)) _mapSeed = s;
-                else if (a.StartsWith("--zoom=") && int.TryParse(a.Substring(7), out int z)) _zoom = Math.Clamp(z, 1, 8);
+                else if (a.StartsWith("--zoom=") && int.TryParse(a.Substring(7), out int z)) unitPixels = Math.Clamp(z, 1, MaxUnitPixels);
                 else if (a.StartsWith("--scenery=")) _sceneryStyle = a.Substring(10) == "classic" ? SceneryStyle.Classic : SceneryStyle.Procedural;
-                else if (a.StartsWith("--density=") && float.TryParse(a.Substring(10), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float d)) _density = Math.Clamp(d, 1, 4);
+                else if (a.StartsWith("--density=") && int.TryParse(a.Substring(10), out int d)) _density = Math.Clamp(d, 1, 4);
             }
+            // the camera renders _density view pixels per map unit; zoom steps are whole multiples of that
+            _camera.Zoom = new Vector2(_density, _density);
+            _zoom = Math.Clamp((int)Math.Round(unitPixels / (double)_density, MidpointRounding.AwayFromZero), 1, MaxZoom);
             BuildOverlay();
             _minimap = new TestAreaMinimap { Area = this };
             AddChild(_minimap);
@@ -323,8 +341,8 @@ namespace PixelCreatures.Workshop
         {
             var s = Size;
             int lw = Math.Max(64, (int)Math.Ceiling(s.X / _zoom)), lh = Math.Max(64, (int)Math.Ceiling(s.Y / _zoom));
-            lw = Math.Min(lw, _map.Width);
-            lh = Math.Min(lh, _map.Height);
+            lw = Math.Min(lw, _map.Width * _density);
+            lh = Math.Min(lh, _map.Height * _density);
             if ((lw & 1) == 1) lw--;
             if ((lh & 1) == 1) lh--;
             _viewport.Size = new Vector2I(lw, lh);
@@ -583,7 +601,7 @@ namespace PixelCreatures.Workshop
                 _sceneryQueue.Sort((a, b) => DistanceSq(props[b], focus).CompareTo(DistanceSq(props[a], focus)));
                 _sceneryQueueSorted = true;
             }
-            var size = (Vector2)_viewport.Size;
+            var size = ViewSize;
             var view = new Rect2(focus - size / 2, size).Grow(SceneryWakeMargin);
             do
             {
@@ -763,7 +781,7 @@ namespace PixelCreatures.Workshop
 
         public void SetZoom(int zoom, Vector2? anchor = null)
         {
-            zoom = Math.Clamp(zoom, 1, 8);
+            zoom = Math.Clamp(zoom, 1, MaxZoom);
             if (zoom == _zoom) return;
             Vector2? mapPoint = anchor.HasValue && !_follow ? ScreenToMap(anchor.Value) : null;
             _zoom = zoom;
@@ -771,8 +789,8 @@ namespace PixelCreatures.Workshop
             if (mapPoint.HasValue)
             {
                 // keep the point under the mouse in place
-                var vp = (anchor!.Value - _display.Position) / _zoom;
-                _cameraPos = mapPoint.Value - vp + (Vector2)_viewport.Size / 2;
+                var offset = (anchor!.Value - _display.Position) / UnitPixels;
+                _cameraPos = mapPoint.Value - offset + ViewSize / 2;
             }
             UpdateCamera();
             UpdateZoomUi();
@@ -802,13 +820,13 @@ namespace PixelCreatures.Workshop
         /// <summary>Converts a position inside this control to screen pixels of the map.</summary>
         public Vector2 ScreenToMap(Vector2 local)
         {
-            var vp = (local - _display.Position) / _zoom;
-            return _camera.Position - (Vector2)_viewport.Size / 2 + vp;
+            var offset = (local - _display.Position) / UnitPixels;
+            return _camera.Position - ViewSize / 2 + offset;
         }
 
         private Vector2 ClampCamera(Vector2 p)
         {
-            var view = (Vector2)_viewport.Size;
+            var view = ViewSize;
             float x = _map.Width <= view.X ? _map.Width / 2f : Math.Clamp(p.X, view.X / 2, _map.Width - view.X / 2);
             float y = _map.Height <= view.Y ? _map.Height / 2f : Math.Clamp(p.Y, view.Y / 2, _map.Height - view.Y / 2);
             return new Vector2(x, y);
@@ -818,7 +836,8 @@ namespace PixelCreatures.Workshop
         {
             if (_follow && _player != null) _cameraPos = new Vector2(_player.Position.X, _player.Position.Y - 12);
             _cameraPos = ClampCamera(_cameraPos);
-            _camera.Position = new Vector2(Mathf.Round(_cameraPos.X), Mathf.Round(_cameraPos.Y));
+            // snap to view pixels
+            _camera.Position = new Vector2(Mathf.Round(_cameraPos.X * _density), Mathf.Round(_cameraPos.Y * _density)) / _density;
         }
 
         // ------------------------------------------------------------------ input
@@ -845,7 +864,7 @@ namespace PixelCreatures.Workshop
                     AcceptEvent();
                     break;
                 case InputEventMouseMotion mm when _dragging:
-                    _cameraPos = ClampCamera(_cameraPos - mm.Relative / _zoom);
+                    _cameraPos = ClampCamera(_cameraPos - mm.Relative / UnitPixels);
                     AcceptEvent();
                     break;
             }
@@ -1061,7 +1080,8 @@ namespace PixelCreatures.Workshop
 
         private void UpdateZoomUi()
         {
-            if (_zoomValue != null) _zoomValue.Text = $"{_zoom}×";
+            // screen pixels per map unit, like the --zoom option
+            if (_zoomValue != null) _zoomValue.Text = $"{UnitPixels}×";
         }
 
         private double _hudTimer;

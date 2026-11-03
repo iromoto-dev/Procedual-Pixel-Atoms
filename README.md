@@ -171,7 +171,7 @@ for platform requirements. Native release binaries are not included or validated
 | Page Up / Page Down | Increase / decrease map size |
 | N / G | Generate a new map / reroll the population |
 | P | Procedural scenery (flora and props that sway) or classic static sprites |
-| Mouse wheel | Zoom |
+| Mouse wheel | Zoom (2, 4, 6 or 8 screen pixels per map unit, so HD sprites stay crisp) |
 | Right- or middle-button drag | Pan the camera |
 | F | Follow the controlled creature again |
 | M / click the minimap | Toggle minimap / move camera there |

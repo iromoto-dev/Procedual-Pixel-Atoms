@@ -218,9 +218,11 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
   sprite resolution. With `ScaleToWorld` (default) the sprite is drawn at 1/density, so the actor keeps its
   world size and moves in world units; pixel stages in the workshop disable it and show one texel per
   stage pixel instead, halving their automatic zoom. The 100-creature overview grid and gallery
-  thumbnails use classic density for throughput, and so does the test area: its map is rendered into a
-  viewport with one pixel per world unit that the zoom scales up, so HD sprites would be rasterized at
-  four times the pixels only to be thinned out by nearest sampling (`--density=2` renders HD anyway).
+  thumbnails use classic density for throughput. The test area renders HD properly: its map view renders
+  as many pixels per world unit as the actors' density (camera zoom 2), so each sprite texel is one view
+  pixel, and the zoom magnifies that view by whole numbers (2, 4, 6 or 8 screen pixels per unit); ground
+  textures keep one texel per unit and appear twice as coarse. `--density=1` gives classic sprites and
+  zoom steps of 1 to 8.
 - **`CreatureActor`** (Node2D, scene `Runtime/CreatureActor.tscn`): loads a preset or family + seed,
   builds asynchronously, simulates with a fixed time step, renders at the animation rate (`AnimationFps`,
   default 15 poses/s – typical for pixel art) and uploads the texture. Controlled via
@@ -253,7 +255,7 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
   nearly the whole reach for rocks and crates), foreshortened to an ellipse – is cleared from
   `TestMap.Clearance`, so `CanOccupy`/`CanTravel` route creatures around it. The test area creates one
   `CreatureActor` per spot (nearest to the camera first, everything in view at once, the rest within the
-  spawn budget) with `CullOffscreen`, 6 poses/s and the creatures' (classic) pixel density, placed with the same
+  spawn budget) with `CullOffscreen`, 6 poses/s and the creatures' (HD) pixel density, placed with the same
   projection as creatures so it y-sorts against them and the cliff faces. Scenery outside the view plus
   a margin is put to sleep (`ProcessMode.Disabled`) once it has culled itself, so hundreds of trees on the
   large maps cost nothing until the camera comes near; creations without wind-driven parts (no trunk lean,

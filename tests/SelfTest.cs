@@ -520,6 +520,11 @@ namespace PixelCreatures.Tests
                 area.LookAt(new Vector2(area.Map.Width - 10, area.Map.Height - 10));
                 await Frames(2);
                 ctx.True(!area.CameraFollows && area.ViewRect.End.X >= area.Map.Width - 1 && area.ViewRect.End.Y >= area.Map.Height - 1, $"camera: {area.ViewRect}");
+                // screen and map coordinates agree: the middle of the control shows the middle of the view, one map unit
+                // is UnitPixels screen pixels
+                var middle = area.ScreenToMap(area.Size / 2);
+                ctx.True(middle.DistanceTo(area.ViewRect.GetCenter()) <= 1, $"screen to map: {middle} vs view centre {area.ViewRect.GetCenter()}");
+                ctx.Near((area.ScreenToMap(area.Size / 2 + new Vector2(area.UnitPixels * 10, 0)) - middle).X, 10, 1e-3, "ten map units across the screen");
 
                 // take control of a visible creature by its position on the map
                 await Frames(5);
@@ -608,9 +613,11 @@ namespace PixelCreatures.Tests
             var scenery = area.SceneryActors().ToList();
             float density = area.Player!.PixelDensity;
             ctx.True(Math.Abs(density - area.PixelDensity) < 1e-6, "creatures use the test area's pixel density");
-            // the viewport shows one pixel per world unit: actors render one texel per viewport pixel, none thrown away
-            ctx.True(area.PixelDensity == TestArea.DefaultPixelDensity && area.AllActors().Concat(scenery).All(a => a.EffectiveDensity == 1 && a.DisplayScale == 1),
-                "test area actors render at classic density, one texel per viewport pixel");
+            // HD shown properly: the view renders PixelDensity pixels per map unit, so every sprite texel is exactly one view
+            // pixel - nothing is thinned out by sampling a half-scale sprite
+            ctx.True(area.PixelDensity == TestArea.DefaultPixelDensity && area.PixelDensity > 1, $"test area renders HD (density {area.PixelDensity})");
+            ctx.True(area.AllActors().Concat(scenery).All(a => a.EffectiveDensity == area.PixelDensity && OneTexelPerViewPixel(a)),
+                "test area actors: one sprite texel per view pixel");
             ctx.True(scenery.All(s => s.Model!.Anatomy.Rig.Stationary && s.CullOffscreen && s.AnimationFps >= 6 && s.AnimationFps <= 8 && Math.Abs(s.PixelDensity - density) < 1e-6),
                 "scenery: stationary creations, culled offscreen, 6-8 poses/s, the creatures' pixel density");
             ctx.True(!area.AllActors().Any(a => scenery.Contains(a)), "scenery is not part of the population");
@@ -664,6 +671,15 @@ namespace PixelCreatures.Tests
         }
 
         private static string Form(CreatureActor a) => a.Genome?.GetChoice("form") ?? "?";
+
+        /// <summary>The actor's sprite maps one texel to one pixel of its viewport (sprite scale times camera zoom).</summary>
+        private static bool OneTexelPerViewPixel(CreatureActor a)
+        {
+            var sprite = a.GetNodeOrNull<Sprite2D>("Sprite");
+            if (sprite == null) return false;
+            var scale = sprite.GetGlobalTransformWithCanvas().Scale;
+            return Math.Abs(scale.X - 1) < 1e-3 && Math.Abs(scale.Y - 1) < 1e-3;
+        }
 
         /// <summary>Checks every scenery actor against the view: outside (plus its cull margin) culled, inside shown, asleep only when culled.</summary>
         private static string? SceneryCullingProblem(TestArea area)
