@@ -75,6 +75,15 @@ namespace PixelCreatures.Core.Shapes
         public double JawOpenMax = 0.55;
         /// <summary>High density facial structure (nasal bridge, cheekbones, brow over each eye, lips, chin).</summary>
         public bool Structure = true;
+        /// <summary>
+        /// The snout is a bird beak: the high density structure draws a culmen ridge, a cere at the beak base
+        /// with the nostrils in it and the brow ridges, instead of a mammal muzzle (bridge, lips, cheeks, chin).
+        /// </summary>
+        public bool Beak;
+        /// <summary>High density crown scales: a grid of small outlined plates over the top of the skull (vipers).</summary>
+        public bool CrownScales;
+        /// <summary>High density heat-sensing pits between eye and nostril, plus the nostrils (pit vipers).</summary>
+        public bool HeatPits;
     }
 
     public sealed class HeadResult
@@ -307,7 +316,8 @@ namespace PixelCreatures.Core.Shapes
                 if (!pattern) p.Flags |= PrimFlags.NoPattern;
                 return p;
             }
-            bool snout = s.SnoutLength > 1.5 && s.Nose == NoseKind.Pad;
+            bool snout = s.SnoutLength > 1.5 && s.Nose == NoseKind.Pad && !s.Beak;
+            if (s.Beak && s.SnoutLength > 0.6) BuildBeak(b, s, head, group, snoutBase, snoutTip, snoutR0, snoutR1, total);
             if (snout)
             {
                 Vec3 dir = (snoutTip - snoutBase).NormalizedOr(Vec3.UnitX);
@@ -336,18 +346,136 @@ namespace PixelCreatures.Core.Shapes
                 Vec3 nrm = ShapeMath.EllipsoidNormal(Mat3.Identity, skullR, eye - skullC);
                 double er = Math.Max(0.8, s.EyeSize * 0.55);
                 Vec3 cheek = eye - nrm * (er * 0.35) + new Vec3(-er * 0.4, -er * 1.25, 0);
-                Hd(b.Ellipsoid(group, head, cheek, new Vec3(skullR.X * 0.36, er * 0.75, skullR.Z * 0.32), s.Material, PatternDomain.Head, 0.4, 0.55, null, side), "cheekbone");
+                if (!s.Beak)
+                    Hd(b.Ellipsoid(group, head, cheek, new Vec3(skullR.X * 0.36, er * 0.75, skullR.Z * 0.32), s.Material, PatternDomain.Head, 0.4, 0.55, null, side), "cheekbone");
                 double browH = 0.35 + 0.65 * DMath.Saturate(s.Brow + 0.25);
                 Vec3 brow = eye - nrm * (er * 0.25) + new Vec3(er * 0.15, er * (0.95 + 0.25 * browH), 0);
                 Hd(b.Ellipsoid(group, head, brow, new Vec3(er * 1.15, er * 0.38 * browH + 0.3, er * 0.75), s.Material, PatternDomain.Head, 0.4, 0.5, null, side), "browarch");
             }
-            if (r.Jaw >= 0 || s.JawLength > 0.05)
+            if (r.Jaw >= 0 && !s.Beak)
             {
                 // chin: a small rounded mass under the front of the lower jaw (on the jaw bone, so it moves)
-                if (r.Jaw >= 0)
+                double jl = r.JawLength, jr = r.JawRadius;
+                Hd(b.Ellipsoid(r.JawGroup, r.Jaw, new Vec3(jl * 0.82, -jr * 0.35, 0), new Vec3(jl * 0.22, jr * 0.62, jr * 0.75), s.JawMaterial, PatternDomain.Head, 0.85, 0.95), "chin");
+            }
+            if (s.CrownScales) BuildCrownScales(b, s, head, skullC, skullR, total);
+            if (s.HeatPits) BuildHeatPits(b, s, head, group, skullC, skullR, snoutBase, snoutTip, snoutR0, snoutR1, total);
+        }
+
+        /// <summary>
+        /// High density bird beak: a lighter culmen ridge along the top of the upper mandible, a waxy cere band
+        /// around the beak base and a dark nostril (nare) set into the cere on each side.
+        /// </summary>
+        private static void BuildBeak(AnatomyBuilder b, HeadSpec s, int head, int group, Vec3 snoutBase, Vec3 snoutTip,
+            double snoutR0, double snoutR1, double total)
+        {
+            double hd = Limbs.HdDensity;
+            Vec3 dir = (snoutTip - snoutBase).NormalizedOr(Vec3.UnitX);
+            Vec3 up = new Vec3(-dir.Y, dir.X, 0);
+            PrimitiveDef Detail(PrimitiveDef p, string tag, int shade)
+            {
+                p.MinDensity = hd;
+                p.DomainLength = total;
+                p.Tag = s.Name + "." + tag;
+                p.Flags |= PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
+                p.ShadeBias = shade;
+                return b.Defer(p);
+            }
+            // culmen: the keel of the upper mandible catches the light as a narrow ridge
+            Vec3 c0 = snoutBase + up * (snoutR0 * 0.62) + dir * (snoutR0 * 0.2);
+            Vec3 c1 = snoutTip + up * (snoutR1 * 0.5) - dir * (snoutR1 * 0.7);
+            Detail(b.Cone(group, head, c0, snoutR0 * 0.44, head, c1, Math.Max(0.3, snoutR1 * 0.45), s.SnoutMaterial, PatternDomain.Head, 0.6, 0.95), "culmen", 1);
+            if (snoutR0 < 0.6) return;
+            // cere: a slightly swollen band over the base of the beak, a shade lighter than the horn
+            Vec3 cc = snoutBase + dir * (snoutR0 * 0.55) + up * (snoutR0 * 0.12);
+            Detail(b.Ellipsoid(group, head, cc, new Vec3(snoutR0 * 0.55, snoutR0 * 1.08, snoutR0 * 1.1), s.SnoutMaterial, PatternDomain.Head, 0.55, 0.6, ShapeMath.Orientation(dir, up)), "cere", 1);
+            // nares: one dark opening on each side of the cere
+            double nr = Math.Max(0.32, snoutR0 * 0.2);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Vec3 np = cc + dir * (snoutR0 * 0.2) + up * (snoutR0 * 0.3) + new Vec3(0, 0, side * snoutR0 * 0.95);
+                Detail(b.Ellipsoid(group, head, np, new Vec3(nr * 1.3, nr, nr), s.SnoutMaterial, PatternDomain.Head, 0.6, 0.62, ShapeMath.Orientation(dir, up), side), "nare", -3);
+            }
+        }
+
+        /// <summary>
+        /// High density crown scales: staggered rows of small plates over the top of the skull. They form their
+        /// own group with a crease shade, so every plate gets a contour (the keeled head scales of vipers).
+        /// </summary>
+        private static void BuildCrownScales(AnatomyBuilder b, HeadSpec s, int head, Vec3 skullC, Vec3 skullR, double total)
+        {
+            int g = b.Group(s.Name + ".scales", 0.25, 0, GroupFlags.CreaseShade, 0.05);
+            double ss = DMath.Clamp(Math.Min(skullR.X, skullR.Z) * 0.42, 0.7, 2.2);
+            int nx = DMath.Clamp((int)Math.Round(skullR.X * 1.5 / ss), 3, 7);
+            int nz = DMath.Clamp((int)Math.Round(skullR.Z * 1.4 / ss), 2, 5);
+            for (int ix = 0; ix < nx; ix++)
+            {
+                double u = DMath.Lerp(-0.55, 0.8, ix / (double)(nx - 1));
+                int cols = nz - (ix % 2);
+                for (int iz = 0; iz < cols; iz++)
                 {
-                    double jl = r.JawLength, jr = r.JawRadius;
-                    Hd(b.Ellipsoid(r.JawGroup, r.Jaw, new Vec3(jl * 0.82, -jr * 0.35, 0), new Vec3(jl * 0.22, jr * 0.62, jr * 0.75), s.JawMaterial, PatternDomain.Head, 0.85, 0.95), "chin");
+                    double v = cols == 1 ? 0 : DMath.Lerp(-0.62, 0.62, iz / (double)(cols - 1)) * (ix % 2 == 1 ? (cols - 1.0) / cols : 1.0);
+                    Vec3 dir = new Vec3(u, 1.05, v);
+                    Vec3 surf = ShapeMath.EllipsoidSurface(skullC, Mat3.Identity, skullR, dir);
+                    Vec3 n = ShapeMath.EllipsoidNormal(Mat3.Identity, skullR, surf - skullC);
+                    double k = 1.0 - 0.25 * Math.Abs(v);
+                    var p = b.Ellipsoid(g, head, surf - n * (ss * 0.12), new Vec3(ss * 0.55 * k, ss * 0.28, ss * 0.48 * k), s.Material, PatternDomain.Head, 0.2, 0.5, ShapeMath.Orientation(Vec3.UnitX, n));
+                    p.DomainLength = total;
+                    p.MinDensity = Limbs.HdDensity;
+                    p.Tag = s.Name + ".scale";
+                    b.Defer(p);
+                }
+            }
+        }
+
+        /// <summary>
+        /// High density pit organs: a dark loreal pit on each side of the snout between the eye and the nostril,
+        /// below the line joining them, and the smaller nostril near the snout tip.
+        /// </summary>
+        private static void BuildHeatPits(AnatomyBuilder b, HeadSpec s, int head, int group, Vec3 skullC, Vec3 skullR,
+            Vec3 snoutBase, Vec3 snoutTip, double snoutR0, double snoutR1, double total)
+        {
+            if (s.SnoutLength < 1.0) return;
+            Vec3 axis = snoutTip - snoutBase;
+            double axisLen = Math.Max(1e-6, axis.Length);
+            Vec3 wideC = Vec3.Lerp(snoutBase, snoutTip, 0.55);
+            Vec3 wideR = new Vec3(s.SnoutLength * 0.45, snoutR1 * 1.02, snoutR0 * s.SnoutWidth);
+            // half width of the head group at (x, y): snout cone, broad muzzle and cranium
+            double SideZ(double x, double y)
+            {
+                double t = DMath.Saturate((x - snoutBase.X) * axis.X / (axisLen * axisLen) + (y - snoutBase.Y) * axis.Y / (axisLen * axisLen));
+                Vec3 onAxis = snoutBase + axis * t;
+                double rc = DMath.Lerp(snoutR0, Math.Max(0.6, snoutR1), t);
+                double z = Math.Sqrt(Math.Max(0, rc * rc - DMath.Sq(y - onAxis.Y)));
+                if (s.SnoutWidth > 1.08)
+                {
+                    double q = 1 - DMath.Sq((x - wideC.X) / wideR.X) - DMath.Sq((y - wideC.Y) / wideR.Y);
+                    if (q > 0) z = Math.Max(z, wideR.Z * Math.Sqrt(q));
+                }
+                double qc = 1 - DMath.Sq((x - skullC.X) / skullR.X) - DMath.Sq((y - skullC.Y) / skullR.Y);
+                if (qc > 0) z = Math.Max(z, skullR.Z * Math.Sqrt(qc));
+                return z;
+            }
+            double pr = DMath.Clamp(snoutR0 * 0.3, 0.45, 1.1);
+            // eye centre as placed by Build (same direction on the cranium)
+            Vec3 eyeDir = new Vec3(DMath.Lerp(0.35, 0.72, s.EyeForward), DMath.Clamp(s.EyeHeight, -0.8, 0.9) * 0.55 + 0.15, DMath.Lerp(0.95, 0.55, s.EyeForward));
+            Vec3 eye = ShapeMath.EllipsoidSurface(skullC, Mat3.Identity, skullR, eyeDir);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                double nx = snoutTip.X - snoutR1 * 0.15, ny = snoutTip.Y + snoutR1 * 0.25;
+                // the pit sits two fifths of the way from the eye to the nostril, just below the line joining them
+                double px = DMath.Lerp(eye.X, nx, 0.42);
+                double py = DMath.Lerp(eye.Y, ny, 0.42) - pr * 1.1;
+                var pit = b.Ellipsoid(group, head, new Vec3(px, py, side * (SideZ(px, py) + pr * 0.1)), new Vec3(pr * 1.15, pr, pr * 0.8), s.Material, PatternDomain.Head, 0.6, 0.65, null, side);
+                var nostril = b.Ellipsoid(group, head, new Vec3(nx, ny, side * (SideZ(nx, ny) * 0.92 + pr * 0.05)), new Vec3(pr * 0.7, pr * 0.62, pr * 0.62), s.Material, PatternDomain.Head, 0.95, 1.0, null, side);
+                foreach (var p in new[] { pit, nostril })
+                {
+                    p.Flags |= PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
+                    p.ShadeBias = -3;
+                    p.DomainLength = total;
+                    p.MinDensity = Limbs.HdDensity;
+                    p.Tag = s.Name + (p == pit ? ".heatpit" : ".nostril");
+                    b.Defer(p);
                 }
             }
         }

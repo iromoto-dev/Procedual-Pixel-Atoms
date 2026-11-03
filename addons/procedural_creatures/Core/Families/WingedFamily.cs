@@ -273,6 +273,7 @@ namespace PixelCreatures.Core.Families
 
             int body = b.Group("body", DMath.Clamp(bodyR * 0.35, 1.2, 3.0));
             double dom = bodyL + bodyR * 2;
+            PrimitiveDef? breast = null;
             if (insect)
             {
                 var th = b.Ellipsoid(body, chest, new Vec3(-bodyR * 0.2, 0, 0), new Vec3(bodyR * 1.1, bodyR * 0.95, bodyR * 0.95), MaterialSlot.Primary, PatternDomain.Body, 0.35, 0.6);
@@ -282,7 +283,7 @@ namespace PixelCreatures.Core.Families
             {
                 var belly = b.Ellipsoid(body, pelvis, new Vec3(bodyL * 0.12, -bodyR * 0.05, 0), new Vec3(bodyL * 0.42, bodyR * 0.95, bodyR * 0.95), MaterialSlot.Primary, PatternDomain.Body, 0.1, 0.55);
                 belly.DomainLength = dom; belly.Tag = "belly";
-                var breast = b.Ellipsoid(body, chest, new Vec3(-bodyR * 0.1, 0, 0), new Vec3(bodyR * 1.1, bodyR * 1.05, bodyR * 1.0), MaterialSlot.Primary, PatternDomain.Body, 0.5, 1.0);
+                breast = b.Ellipsoid(body, chest, new Vec3(-bodyR * 0.1, 0, 0), new Vec3(bodyR * 1.1, bodyR * 1.05, bodyR * 1.0), MaterialSlot.Primary, PatternDomain.Body, 0.5, 1.0);
                 breast.DomainLength = dom; breast.Tag = "breast";
             }
 
@@ -355,6 +356,7 @@ namespace PixelCreatures.Core.Families
                 DomainLength = headR * 3,
                 JawOpenMax = 0.55,
                 Nostrils = bat,
+                Beak = birdBeak,
             };
             var head = Heads.Build(b, hs);
             var nk = b.Cone(body, neck, Vec3.Zero, Math.Max(1.0, bodyR * 0.6), head.Head, head.SkullCenterLocal * 0.3, Math.Max(0.9, headR * 0.75),
@@ -456,6 +458,7 @@ namespace PixelCreatures.Core.Families
                     BodyAttach = P + new Vec3(bodyL * 0.05, bodyR * 0.2, bodyR * 0.55),
                     ClawSize = bat ? 0.8 : 0.0,
                     ThumbClaw = bat,
+                    Coverts = birdBeak ? (chord > 7 ? 3 : 2) : 0,
                 });
             }
 
@@ -504,6 +507,9 @@ namespace PixelCreatures.Core.Families
                         Claws = talons > 0.3 ? 3 : 0, ClawSize = DMath.Lerp(0.5, 1.4, talons),
                         LiftHeight = Math.Max(1.2, hip.Y * 0.35), MetaAngle = 14, BlendRadius = 0.6, DomainLength = len,
                         Phase = side < 0 ? 0.0 : 0.5,
+                        // high density: scaled bird legs (owls are feathered to the toes, raptors wear trousers)
+                        Avian = birdBeak,
+                        Feathering = birdBeak ? (form == "owl" ? 1.0 : (form == "raptor" ? 0.45 : 0.0)) : 0.0,
                     });
                     b.Rig.Legs.Add(leg);
                 }
@@ -548,6 +554,15 @@ namespace PixelCreatures.Core.Families
                         Stiffness = 0.8, RestPitch = new[] { 0.0 }, RestYaw = new[] { 0.0 }, Droop = 0.2,
                     };
                 }
+            }
+
+            // high density plumage: overlapping contour feathers over the breast
+            if (birdBeak && breast != null)
+            {
+                var plumage = b.HdSwap(breast, Limbs.HdDensity);
+                plumage.Flags |= PrimFlags.Scallops;
+                plumage.DetailSize = DMath.Clamp(bodyR * 0.36, 1.3, 2.8);
+                plumage.Tag = "breast.feathers";
             }
 
             // ---- rig semantics & metrics

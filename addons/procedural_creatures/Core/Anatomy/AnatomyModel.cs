@@ -69,6 +69,17 @@ namespace PixelCreatures.Core.Anatomy
         Scutes = 1024,
         /// <summary>Triangle with explicit surface coordinates per vertex (UvA/UvB/UvC): faces of solids share one mapping.</summary>
         UvMapped = 2048,
+        /// <summary>
+        /// Overlapping rows of round scales or contour feathers in the surface coordinates of the primitive (cell size
+        /// DetailSize): front rows lie on top, the exposed rear rim of each scale is a shade darker. Only shaded at high
+        /// pixel density; meant for MinDensity swaps of body primitives, so patterns stay continuous.
+        /// </summary>
+        Scallops = 4096,
+        /// <summary>
+        /// Ring grooves around the part every DetailSize along its surface coordinate U (annelid segments): a shade
+        /// darker groove with each annulus lit a little fuller. Only shaded at high pixel density, like Scallops.
+        /// </summary>
+        Annuli = 8192,
     }
 
     /// <summary>Material slots of a creature. The palette maps each slot to a ramp of shades.</summary>
@@ -137,6 +148,8 @@ namespace PixelCreatures.Core.Anatomy
         public int ShadeBias;
         /// <summary>Faceted shading / scute layout seed (PrimFlags.Faceted, PrimFlags.Scutes).</summary>
         public uint FacetSeed;
+        /// <summary>Cell size in world units of surface tilings (PrimFlags.Scallops, PrimFlags.Annuli).</summary>
+        public double DetailSize;
         /// <summary>Level of detail: primitive is skipped at render quality below this value.</summary>
         public int MinQuality;
         /// <summary>

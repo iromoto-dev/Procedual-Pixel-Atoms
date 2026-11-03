@@ -63,6 +63,8 @@ namespace PixelCreatures.Core.Rendering
             public PatternDomain Domain;
             public double U0, U1, DomainLength;
             public uint FacetSeed;
+            /// <summary>Scallop cell / annulus size in pixels (PrimFlags.Scallops, PrimFlags.Annuli).</summary>
+            public double DetailSize;
             public bool Hard;
             /// <summary>High density fur/feather silhouette breakup amplitude in pixels (0 = smooth edge).</summary>
             public double Fuzz;
@@ -310,6 +312,7 @@ namespace PixelCreatures.Core.Rendering
                 p.U1 = d.U1;
                 p.DomainLength = d.DomainLength * _s;
                 p.FacetSeed = d.FacetSeed;
+                p.DetailSize = d.DetailSize * _s;
                 p.Hard = (d.Flags & PrimFlags.Hard) != 0;
                 bool ok;
                 switch (d.Kind)
@@ -1045,9 +1048,19 @@ namespace PixelCreatures.Core.Rendering
                         }
                         bool seam = false, scutes = (p.Flags & PrimFlags.Scutes) != 0 && p.Kind == PrimKind.Ellipsoid && hasSurface;
                         if (scutes) ndl += ScuteOffset(ref p, sp, out seam);
+                        bool rim = false;
+                        if ((p.Flags & PrimFlags.Scallops) != 0 && hasSurface && _s >= 1.5 && p.DetailSize >= 2.0) ndl += ScallopOffset(ref p, sp, out rim);
+                        if ((p.Flags & PrimFlags.Annuli) != 0 && hasSurface && _s >= 1.5 && p.DetailSize >= 2.0)
+                        {
+                            // grooves one pixel wide every DetailSize pixels along the part
+                            double f = DMath.Frac(sp.U / p.DetailSize);
+                            rim |= f * p.DetailSize < 1.0;
+                            ndl += 0.08 * DMath.Sin(DMath.Pi * f) - 0.03;
+                        }
                         level = style.Level(ndl, ndh);
                         if (level == Shade.Highlight && ((_pflags[i] & FlagFillet) != 0 || scutes)) level = Shade.Light;
                         if (seam) level = Math.Min(level, Shade.Shadow) - 1;
+                        if (rim) level -= 1;
                     }
                     level += bias;
                     if ((_pflags[i] & FlagBack) != 0) level -= 1;
@@ -1241,6 +1254,37 @@ namespace PixelCreatures.Core.Rendering
             double pxToCell = cells / Math.Max(2.0, p.REq);
             if (f2 - f1 < 1.15 * pxToCell) { seam = true; return 0; }
             return 0.16 * (1.0 - DMath.Saturate(f1 / 0.62)) - 0.04;
+        }
+
+        /// <summary>
+        /// Overlapping scales or contour feathers: staggered columns of round cells along the part (U) and around
+        /// it (V). Columns further forward lie on top, so every cell shows its rear crescent; the pixel ring at its
+        /// exposed rim is reported for a darker shade and cells are lit a little more towards their centre.
+        /// </summary>
+        private static double ScallopOffset(ref PPrim p, in SurfacePoint sp, out bool rim)
+        {
+            rim = false;
+            double cs = p.DetailSize;
+            double a = sp.U / cs, bv = sp.V / cs;
+            int ia = (int)Math.Floor(a);
+            const double R = 0.74;
+            double px = 1.0 / cs;
+            for (int ci = ia + 1; ci >= ia - 1; ci--)
+            {
+                double off = (ci & 1) != 0 ? 0.5 : 0.0;
+                int jb = (int)Math.Floor(bv - off + 0.5);
+                double best = 1e9;
+                for (int cj = jb - 1; cj <= jb + 1; cj++)
+                {
+                    double dx = a - ci, dy = bv - (cj + off);
+                    double d = Math.Sqrt(dx * dx + dy * dy);
+                    if (d < best) best = d;
+                }
+                if (best >= R) continue;
+                rim = R - best < px * 1.05;
+                return 0.1 * (1.0 - best / R) - 0.02;
+            }
+            return 0;
         }
 
         private Vec3 FacetNormal(ref PPrim p, Vec3 n)

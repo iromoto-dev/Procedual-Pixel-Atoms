@@ -55,6 +55,12 @@ namespace PixelCreatures.Core.Shapes
         public double Feathering;
         /// <summary>Muscle definition at high density (0 = none, 1 = athletic).</summary>
         public double Muscle = 0.7;
+        /// <summary>
+        /// Bird leg at high density: a bare tarsus in the foot material ringed with scutes, three forward toes
+        /// and a hind toe (hallux) with talons instead of a mammal paw. Feathering then covers the tarsus from
+        /// the ankle down (0 = bare, 0.5 = raptor trousers, 1 = feathered to the toes like an owl).
+        /// </summary>
+        public bool Avian;
     }
 
     public static class Limbs
@@ -236,6 +242,8 @@ namespace PixelCreatures.Core.Shapes
                     var paw = b.Ellipsoid(group, foot, new Vec3(s.PawLength * 0.28, s.PawRadius * 0.12, 0),
                         new Vec3(s.PawLength * 0.55, s.PawRadius * 0.7, s.PawRadius * 0.95), s.FootMaterial, PatternDomain.Limb, 0.95, 1.0, null, s.Side);
                     paw.DomainLength = len; paw.Tag = s.Name + ".paw";
+                    // bird feet: the classic paw blob gives way to separate toes at high density
+                    if (s.Avian) paw.MaxDensity = HdDensity;
                 }
             }
             if (!s.NoFoot) BuildDetail(b, group, hip, knee, ankle, foot, s, l1, l2, l3, len, u1, u2);
@@ -277,6 +285,11 @@ namespace PixelCreatures.Core.Shapes
         private static void BuildDetail(AnatomyBuilder b, int group, int hip, int knee, int ankle, int foot, LegSpec s,
             double l1, double l2, double l3, double len, double u1, double u2)
         {
+            if (s.Avian && !s.IsArm && !s.Hand && s.Style != LegStyle.Arthropod)
+            {
+                BuildAvian(b, group, ankle, foot, s, l3, len);
+                return;
+            }
             var mat = s.Material;
             bool arthropod = s.Style == LegStyle.Arthropod;
             double m = DMath.Saturate(s.Muscle);
@@ -431,6 +444,64 @@ namespace PixelCreatures.Core.Shapes
                 var tuft = b.Cone(group, foot, a, pr * (0.55 + 0.25 * f), foot, tip, pr * 0.25, MaterialSlot.Hair, PatternDomain.Limb, 0.9, 0.97, s.Side);
                 tuft.DomainLength = len;
                 Hd(tuft, s.Name + ".feather");
+            }
+        }
+
+        /// <summary>
+        /// High density bird leg: the tarsus is bare skin in the foot material, ringed with scutes (or feathered
+        /// from the ankle down), and the foot splits into three forward toes and a hind toe, each with a talon.
+        /// </summary>
+        private static void BuildAvian(AnatomyBuilder b, int group, int ankle, int foot, LegSpec s, double l3, double len)
+        {
+            double ra = s.RadiusAnkle, rf = Math.Max(0.45, s.RadiusFoot);
+            double feathered = DMath.Saturate(s.Feathering);
+            // ankle bone frame: +X runs down the tarsus to the foot
+            var tarsus = b.Cone(group, ankle, Vec3.Zero, ra * 1.06, ankle, new Vec3(l3, 0, 0), rf * 1.06, s.FootMaterial, PatternDomain.Limb, 0.8, 0.95, s.Side);
+            tarsus.DomainLength = len;
+            b.Defer(Hd(tarsus, s.Name + ".tarsus"));
+            if (feathered > 0.05)
+            {
+                // trousers: a feathered sleeve from the ankle down, flaring a little at its lower rim
+                double end = l3 * DMath.Lerp(0.35, 1.0, feathered);
+                var sleeve = b.Cone(group, ankle, new Vec3(-ra * 0.2, 0, 0), ra * 1.3, ankle, new Vec3(end, 0, 0), DMath.Lerp(ra, rf, end / l3) * 1.4, s.Material, PatternDomain.Limb, 0.75, 0.9, s.Side);
+                sleeve.DomainLength = len;
+                b.Defer(Hd(sleeve, s.Name + ".trousers"));
+            }
+            // scutes: thin, slightly darker rings down the bare part of the tarsus
+            double spacing = Math.Max(1.1, ra * 0.95);
+            double bare0 = feathered > 0.05 ? l3 * DMath.Lerp(0.35, 1.0, feathered) + spacing * 0.5 : spacing * 0.6;
+            for (double x = bare0; x < l3 - spacing * 0.35; x += spacing)
+            {
+                double r = DMath.Lerp(ra, rf, x / l3);
+                var ring = b.Ellipsoid(group, ankle, new Vec3(x, 0, 0), new Vec3(Math.Max(0.38, spacing * 0.22), r * 1.2, r * 1.2), s.FootMaterial, PatternDomain.None, 0, 1, null, s.Side);
+                ring.Flags |= PrimFlags.NoPattern | PrimFlags.Hard;
+                ring.ShadeBias = -1;
+                b.Defer(Hd(ring, s.Name + ".scute"));
+            }
+            // anisodactyl foot (foot bone frame: +X creature forward, +Y up): three toes fan forward, the
+            // hallux points back; all of them rest on the ground and end in a talon
+            double pr = s.PawRadius, pl = s.PawLength;
+            double sole = Math.Max(0.6, pr * 0.7);
+            double r0 = Math.Max(0.35, pr * 0.42), r1 = Math.Max(0.3, pr * 0.28);
+            Vec3 heel = new Vec3(pr * 0.1, -sole * 0.35, 0);
+            for (int i = -1; i <= 2; i++)
+            {
+                bool hallux = i == 2;
+                double a = hallux ? DMath.Pi : i * 0.62;
+                double tl = hallux ? pl * 0.55 : pl * (i == 0 ? 1.05 : 0.82);
+                Vec3 tip = new Vec3(DMath.Cos(a) * tl, -sole + r1 + 0.05, DMath.Sin(a) * tl);
+                var toe = b.Cone(group, foot, heel, r0, foot, tip, r1, s.FootMaterial, PatternDomain.Limb, 0.97, 1.0, s.Side);
+                toe.DomainLength = len;
+                b.Defer(Hd(toe, s.Name + (hallux ? ".hallux" : ".toe")));
+                if (s.Claws > 0 && s.ClawSize > 0.2)
+                {
+                    Vec3 dir = new Vec3(DMath.Cos(a), 0, DMath.Sin(a));
+                    Vec3 talon = tip + dir * (s.ClawSize * 0.75) + new Vec3(0, -Math.Max(0.3, s.ClawSize * 0.45), 0);
+                    var claw = b.Cone(group, foot, tip - dir * (r1 * 0.3), Math.Max(0.32, s.ClawSize * 0.32), foot, talon, 0.26, MaterialSlot.Accent, PatternDomain.None, 0, 1, s.Side);
+                    claw.Flags |= PrimFlags.Thin | PrimFlags.NoPattern | PrimFlags.Hard;
+                    claw.ShadeBias = -2;
+                    b.Defer(Hd(claw, s.Name + ".talon"));
+                }
             }
         }
 

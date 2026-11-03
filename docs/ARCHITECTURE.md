@@ -173,6 +173,29 @@ claws, hooves, fingers, facial structure, flat ears, chitin joints and bristles 
 musculature, scutes and ribs. Detail primitives never enlarge the canvas, and classic density output is
 bit-identical to the output without them (the golden values pin both).
 
+Opt-in HD options on the shared blocks: `LegSpec.Avian` (bare tarsus ringed with scutes or feathered
+"trousers" via `Feathering`, three forward toes and a hallux with talons), `WingSpec.Coverts` (rows of
+covert feathers over arm and forearm, each row its own outlined group), `HeadSpec.Beak` (culmen ridge, cere
+and nares instead of the mammal muzzle), `HeadSpec.CrownScales` and `HeadSpec.HeatPits` (pit vipers),
+`FinSpec.Rays`, `ChainSpec.TipRays` and `DorsalSpec.Rays` (fin rays). Families use them and add their own
+layers: breast plumage for birds; gill slits or gill covers, the lateral line and scale rows for fish;
+ventral scale bands for snakes and annulus grooves for worms; gloss, sparkle and bubbles for slimes and
+suckers on tentacles.
+
+Three tools keep this cheap and safe:
+
+- `AnatomyBuilder.HdSwap(classic, density)` hides a classic primitive from the given density on and appends
+  an identical copy that is only drawn from it, so the HD copy can take an HD-only surface treatment while
+  geometry, blending and pattern coordinates stay exactly the same.
+- Surface tilings shade the HD copy in its own pattern coordinates (`DetailSize` sets the cell size):
+  `PrimFlags.Scallops` draws overlapping scales or contour feathers (front rows on top, exposed rear rim a
+  shade darker), `PrimFlags.Annuli` ring grooves along the part. Because they live in the host surface's
+  coordinates, patterns, countershading and silhouettes are unaffected. Separate small detail primitives
+  cannot do that: each evaluates patterns in its own frame.
+- `AnatomyBuilder.Defer(detail)` moves a detail primitive created in the middle of a build behind every
+  other primitive. Primitive indices seed faceted shading (stone and crystal materials, `Faceted` and
+  `Scutes` without a `FacetSeed`), so detail added mid-build must not take the index of a classic primitive.
+
 ## Animation
 
 `CreatureMotor` simulates one instance with a fixed time step. Each step:

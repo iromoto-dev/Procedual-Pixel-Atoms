@@ -456,6 +456,9 @@ namespace PixelCreatures.Core.Families
                 }
             }
 
+            // ---- high density detail (appended last: primitive indices seed the faceted crystal above)
+            BuildHdDetail(b, form, body, chest, pelvis, Rw, Rh, y0, up);
+
             // ---- rig semantics & metrics
             double hover = g.Get("hover");
             b.Rig.Locomotion = floating ? LocomotionKind.Float : LocomotionKind.Hop;
@@ -485,6 +488,108 @@ namespace PixelCreatures.Core.Families
             b.AnimationMargin = Math.Max(6, Rw * 0.9 + (floating ? tLen * 0.3 : b.Metrics.RunSpeed * 0.2 + 2));
             b.ExtraHeadroom = Math.Max(6, (floating ? b.Rig.Altitude : Rh * 1.1) + Rh * 0.3);
             return b.Build(g.AnatomyKey);
+        }
+
+        /// <summary>
+        /// High density detail. Slimes and oozes: a glossy specular highlight with a sparkle near the top of the dome
+        /// and a few air bubbles floating just under the surface (lighter discs, each with a glint). Octopuses and
+        /// other tentacled bodies (not jellyfish or wisps): rows of pale suckers along the inner side of each tentacle.
+        /// </summary>
+        private static void BuildHdDetail(AnatomyBuilder b, string form, int body, int chest, int pelvis, double Rw, double Rh, double y0, double up)
+        {
+            double hd = Limbs.HdDensity;
+            if (form == "slime" || form == "ooze")
+            {
+                // upper dome (chest frame) and lower mass (pelvis frame) as built above
+                Vec3 domeC = new Vec3(-Rw * 0.05, up - Rh * 0.1, 0), domeR = new Vec3(Rw * 0.82, Rh * 0.62, Rw * 0.86);
+                Vec3 lowC = new Vec3(0, -y0 * 0.25, 0), lowR = new Vec3(Rw, Rh * 0.55, Rw);
+                // specular highlight: a glossy window just off the crown, where the 30 degree camera sees it from every
+                // facing direction; emissive so it stays bright on the shadow side as well
+                Vec3 hdir = new Vec3(0.12, 1.0, -0.22);
+                Vec3 hs = ShapeMath.EllipsoidSurface(domeC, Mat3.Identity, domeR, hdir);
+                Vec3 hn = ShapeMath.EllipsoidNormal(Mat3.Identity, domeR, hs - domeC);
+                double hr = Math.Max(1.0, Rw * 0.24);
+                int hg = b.Group("gloss", 0.0, 0, GroupFlags.NoOutline | GroupFlags.NoContour, 0.3);
+                var gloss = b.Ellipsoid(hg, chest, hs - hn * (hr * 0.1), new Vec3(hr * 1.3, hr * 0.22, hr * 0.72), MaterialSlot.Primary, PatternDomain.None, 0, 1,
+                    ShapeMath.Orientation(new Vec3(1, 0, 0.6), hn));
+                gloss.Flags |= PrimFlags.Emissive | PrimFlags.NoPattern | PrimFlags.NoShadow | PrimFlags.Hard;
+                gloss.ShadeBias = 1;
+                gloss.MinDensity = hd;
+                gloss.Tag = "gloss";
+                Vec3 sparkle = ShapeMath.EllipsoidSurface(domeC, Mat3.Identity, domeR, hdir + new Vec3(-0.5, -0.15, -0.45));
+                b.Feature(new FeatureDef
+                {
+                    Kind = FeatureKind.Spot, Bone = chest, LocalPosition = sparkle, LocalNormal = ShapeMath.EllipsoidNormal(Mat3.Identity, domeR, sparkle - domeC),
+                    Size = 1, Material = MaterialSlot.White, Group = body, MinDensity = hd,
+                });
+
+                // bubbles on the sides and back (the face stays clear), half sunk into the jelly
+                var rng = b.RngFor("hd.bubbles");
+                int count = DMath.Clamp((int)Math.Round(Rw / 2.2), 2, 6);
+                for (int i = 0; i < count; i++)
+                {
+                    double a = (rng.Chance(0.5) ? 1 : -1) * rng.Range(0.42, 1.0) * DMath.Pi;
+                    double e = rng.Range(-0.35, 0.65);
+                    double br = Math.Max(0.6, Rw * rng.Range(0.06, 0.12));
+                    bool upper = e > 0.2;
+                    Vec3 c = upper ? domeC : lowC, r = upper ? domeR : lowR;
+                    Vec3 dir = new Vec3(DMath.Cos(a) * DMath.Cos(e), DMath.Sin(e), DMath.Sin(a) * DMath.Cos(e));
+                    Vec3 sp = ShapeMath.EllipsoidSurface(c, Mat3.Identity, r, dir);
+                    Vec3 n = ShapeMath.EllipsoidNormal(Mat3.Identity, r, sp - c);
+                    int bone = upper ? chest : pelvis;
+                    var bubble = b.Ellipsoid(body, bone, sp - n * (br * 0.4), new Vec3(br, br * 0.55, br), MaterialSlot.Primary, PatternDomain.None, 0, 1,
+                        ShapeMath.Orientation(Vec3.UnitX, n));
+                    bubble.Flags |= PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow | PrimFlags.Translucent;
+                    bubble.ShadeBias = 2;
+                    bubble.MinDensity = hd;
+                    bubble.Tag = "bubble";
+                    // glint on the upper rim of the bubble
+                    Vec3 tangentUp = (Vec3.UnitY - n * Vec3.Dot(n, Vec3.UnitY)).NormalizedOr(Vec3.UnitX);
+                    b.Feature(new FeatureDef
+                    {
+                        Kind = FeatureKind.Spot, Bone = bone, LocalPosition = sp + n * (br * 0.12) + tangentUp * (br * 0.45), LocalNormal = n,
+                        Size = 1, Material = MaterialSlot.White, Group = body, MinDensity = hd,
+                    });
+                }
+            }
+
+            if (form == "jelly" || form == "wisp") return;
+            foreach (var chain in b.Rig.Tentacles)
+            {
+                int group = -1;
+                foreach (var grp in b.Groups) if (grp.Name == chain.Name) { group = grp.Index; break; }
+                if (group < 0) continue;
+                // chain bone frames: +X along the tentacle, +Y on the inside of the curl, where the suckers sit
+                for (int i = 0; i + 1 < chain.Bones.Length; i++)
+                {
+                    double r0 = chain.Radii[i], r1 = chain.Radii[i + 1], len = chain.Lengths[i];
+                    double rm = (r0 + r1) * 0.5;
+                    if (rm < 0.7) continue;
+                    bool rows = rm > 1.5;
+                    int m = DMath.Clamp((int)Math.Round(len / Math.Max(1.2, rm * (rows ? 1.4 : 1.1))), 1, 4);
+                    for (int k = 0; k < m; k++)
+                    {
+                        double f = (k + 0.5) / m;
+                        double r = DMath.Lerp(r0, r1, f);
+                        double sr = Math.Max(0.4, r * (rows ? 0.3 : 0.38));
+                        double z = rows ? (k % 2 == 0 ? 1 : -1) * r * 0.38 : 0;
+                        double yy = Math.Sqrt(Math.Max(0, r * r - z * z));
+                        // a pale rim around a dark cup
+                        Vec3 nrm = new Vec3(0, yy, z).NormalizedOr(Vec3.UnitY);
+                        Vec3 at = new Vec3(len * f, 0, 0) + nrm * (r * 0.92);
+                        var rot = ShapeMath.Orientation(Vec3.UnitX, nrm);
+                        var rim = b.Ellipsoid(group, chain.Bones[i], at, new Vec3(sr, sr * 0.4, sr), MaterialSlot.White, PatternDomain.None, 0, 1, rot, chain.Side);
+                        var cup = b.Ellipsoid(group, chain.Bones[i], at + nrm * (sr * 0.12), new Vec3(sr * 0.45, sr * 0.36, sr * 0.45), MaterialSlot.Primary, PatternDomain.None, 0, 1, rot, chain.Side);
+                        cup.ShadeBias = -2;
+                        foreach (var p in new[] { rim, cup })
+                        {
+                            p.Flags |= PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
+                            p.MinDensity = hd;
+                            p.Tag = chain.Name + ".sucker";
+                        }
+                    }
+                }
+            }
         }
     }
 }

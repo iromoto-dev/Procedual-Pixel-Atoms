@@ -40,6 +40,8 @@ namespace PixelCreatures.Core.Shapes
         public double RestAngle;
         /// <summary>Oscillating fins get a FinRig; fixed fins (dorsal) only geometry.</summary>
         public bool Animated = true;
+        /// <summary>Fin rays drawn at high pixel density (pointed and blade fins; 0 = none).</summary>
+        public int Rays;
     }
 
     public static class Fins
@@ -107,9 +109,11 @@ namespace PixelCreatures.Core.Shapes
                 case FinShape.Blade:
                     Tri(front, rear, new Vec3(L, 0, 0) + rear * 1.1);
                     Tri(front, new Vec3(L, 0, 0) + rear * 1.1, new Vec3(L * 0.55, 0, 0) + front * 0.1);
+                    if (s.Rays > 0) Rays(b, g, bone, front, rear, new[] { front, new Vec3(L * 0.55, 0, 0) + front * 0.1, new Vec3(L, 0, 0) + rear * 1.1, rear }, s.Rays, s.Material, side, name);
                     break;
                 default:
                     Tri(front, rear, new Vec3(L, 0, 0) + rear * 0.35);
+                    if (s.Rays > 0 && s.Shape == FinShape.Pointed) Rays(b, g, bone, front, rear, new[] { front, new Vec3(L, 0, 0) + rear * 0.35, rear }, s.Rays, s.Material, side, name);
                     break;
             }
             if (s.Animated)
@@ -126,6 +130,46 @@ namespace PixelCreatures.Core.Shapes
                     RestAngle = s.RestAngle * (side < 0 ? -1 : 1),
                 });
             }
+        }
+
+        /// <summary>
+        /// High density fin rays: thin, slightly darker struts from points along the fin base to matching points
+        /// along its free edge (given as a polyline from the front base corner to the rear base corner), so they
+        /// fan out like the lepidotrichia of a real fin and shorten towards the rear.
+        /// </summary>
+        public static void Rays(AnatomyBuilder b, int group, int bone, Vec3 front, Vec3 rear, Vec3[] edge, int count, MaterialSlot material, int side, string name)
+        {
+            double total = 0;
+            for (int i = 0; i + 1 < edge.Length; i++) total += (edge[i + 1] - edge[i]).Length;
+            if (total < 1e-6) return;
+            for (int k = 1; k <= count; k++)
+            {
+                double t = k / (count + 1.0);
+                Vec3 basePt = Vec3.Lerp(front, rear, t);
+                // point at arc length fraction t along the free edge
+                double want = t * total, acc = 0;
+                Vec3 end = edge[edge.Length - 1];
+                for (int i = 0; i + 1 < edge.Length; i++)
+                {
+                    double l = (edge[i + 1] - edge[i]).Length;
+                    if (acc + l >= want) { end = Vec3.Lerp(edge[i], edge[i + 1], l > 1e-9 ? (want - acc) / l : 0); break; }
+                    acc += l;
+                }
+                end = Vec3.Lerp(basePt, end, 0.9);
+                if ((end - basePt).Length < 0.8) continue;
+                Ray(b, group, bone, basePt, bone, end, material, side, name);
+            }
+        }
+
+        /// <summary>One high density fin ray between two bones (thin, hard, a shade darker than the membrane; deferred behind all classic primitives).</summary>
+        public static PrimitiveDef Ray(AnatomyBuilder b, int group, int boneA, Vec3 a, int boneB, Vec3 c, MaterialSlot material, int side, string name)
+        {
+            var r = b.Cone(group, boneA, a, 0.46, boneB, c, 0.4, material, PatternDomain.None, 0, 1, side);
+            r.Flags |= PrimFlags.Thin | PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
+            r.ShadeBias = -1;
+            r.MinDensity = Limbs.HdDensity;
+            r.Tag = name + ".ray";
+            return b.Defer(r);
         }
 
         /// <summary>Rotation that maps the ellipsoid's local Z (width) onto the given in-plane direction.</summary>

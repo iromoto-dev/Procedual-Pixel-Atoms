@@ -341,6 +341,7 @@ namespace PixelCreatures.Core.Families
                 Group = body,
                 Stiffness = form == "eel" ? 0.35 : 0.6,
                 Droop = 0.0,
+                TipRays = 3,
             };
             var tail = Chains.Build(b, tspec);
             b.Rig.Tail = tail;
@@ -420,6 +421,7 @@ namespace PixelCreatures.Core.Families
                         double scale = dorsalShape == "sail" ? 0.5 + 0.7 * DMath.Sin(DMath.Pi * t) : 0.8;
                         ds.Anchors.Add((t < 0.5 ? pelvis : chest, new Vec3(x, Math.Max(y0, top) - 0.3, 0), Vec3.UnitY, scale));
                     }
+                    ds.Rays = dorsalShape == "sail";
                     Dorsal.Build(b, ds);
                 }
                 else
@@ -430,6 +432,7 @@ namespace PixelCreatures.Core.Families
                         Shape = dorsalShape == "blade" ? FinShape.Blade : FinShape.Pointed,
                         AnchorBone = spine, Base = (P + C) * 0.5 + new Vec3(L * 0.06, H * 0.82, 0), Direction = new Vec3(-0.45, 1, 0),
                         Length = Math.Max(2.0, H * DMath.Lerp(0.6, 1.6, dorsal)), Width = Math.Max(2.0, L * 0.28),
+                        Rays = DMath.Clamp((int)Math.Round(L * 0.28 / 1.6), 3, 7),
                     });
                 }
             }
@@ -441,6 +444,7 @@ namespace PixelCreatures.Core.Families
                     Name = "anal", Kind = FinKind.Anal, Paired = false, Animated = false, Shape = FinShape.Pointed,
                     AnchorBone = pelvis, Base = P + new Vec3(-L * 0.1, -H * 0.7, 0), Direction = new Vec3(-0.6, -1, 0),
                     Length = Math.Max(1.5, H * DMath.Lerp(0.4, 1.0, anal)), Width = Math.Max(1.5, L * 0.2),
+                    Rays = DMath.Clamp((int)Math.Round(L * 0.2 / 1.6), 2, 5),
                 });
             }
             if (extra == "spikes")
@@ -456,6 +460,8 @@ namespace PixelCreatures.Core.Families
                 }
                 Dorsal.Build(b, ds);
             }
+
+            BuildHdDetail(b, form, ray, head, P, C, L, H, W, y0, pelvis, spine, chest, front, rear);
 
             // ---- rig semantics & metrics
             b.Rig.Locomotion = LocomotionKind.Swim;
@@ -479,6 +485,118 @@ namespace PixelCreatures.Core.Families
             return b.Build(g.AnatomyKey);
         }
 
+        /// <summary>
+        /// High density anatomy: gill openings behind the head (five slits on sharks, a curved gill cover edge on
+        /// bony fish, a small opening on eels), the lateral line along the flank and, on reef fish, overlapping scale
+        /// rows (a scalloped swap of the two body ellipsoids, so patterns and countershading stay continuous).
+        /// </summary>
+        private static void BuildHdDetail(AnatomyBuilder b, string form, bool ray, HeadResult head, Vec3 P, Vec3 C,
+            double L, double H, double W, double y0, int pelvis, int spine, int chest, PrimitiveDef front, PrimitiveDef rear)
+        {
+            double hd = Limbs.HdDensity;
+            if (form == "reef")
+            {
+                double cell = DMath.Clamp(Math.Min(H, W) * 0.36, 1.1, 2.6);
+                foreach (var body in new[] { front, rear })
+                {
+                    var scaled = b.HdSwap(body, hd);
+                    scaled.Flags |= PrimFlags.Scallops;
+                    scaled.DetailSize = cell;
+                    scaled.Tag = body.Tag + ".scales";
+                }
+            }
+            if (ray) return;
+
+            // outer surface (rest pose, creature space): farthest hit of the body and skull ellipsoids along a ray
+            // from the body axis; all of them are axis aligned because the spine runs along +X
+            var hx = b.RestWorld(head.Head);
+            Vec3 skullC = hx.Point(head.SkullCenterLocal);
+            var shells = new[]
+            {
+                (C + new Vec3(-L * 0.05, 0, 0), new Vec3(L * 0.34, H, W)),
+                (P, new Vec3(L * 0.38, H * 0.85, W * 0.8)),
+                (skullC, head.SkullRadii),
+            };
+            Vec3 Surface(double x, double theta, int side)
+            {
+                Vec3 d = new Vec3(0, DMath.Sin(theta), side * DMath.Cos(theta));
+                double best = 0;
+                foreach (var (c, r) in shells)
+                {
+                    double k = 1 - DMath.Sq((x - c.X) / r.X);
+                    if (k <= 0) continue;
+                    double oy = y0 - c.Y;
+                    double qa = DMath.Sq(d.Y / r.Y) + DMath.Sq(d.Z / r.Z);
+                    double qb = 2 * oy * d.Y / (r.Y * r.Y);
+                    double qc = DMath.Sq(oy / r.Y) - k;
+                    double disc = qb * qb - 4 * qa * qc;
+                    if (disc < 0) continue;
+                    best = Math.Max(best, (-qb + Math.Sqrt(disc)) / (2 * qa));
+                }
+                return new Vec3(x, y0, 0) + d * (best + 0.5);
+            }
+            int BoneFor(double x) => x > (C.X + (P.X + C.X) * 0.5) * 0.5 ? chest : (x > (P.X + (P.X + C.X) * 0.5) * 0.5 ? spine : pelvis);
+            void Line(int boneA, Vec3 a, int boneB, Vec3 c, int shade, string tag)
+            {
+                var pa = b.RestWorld(boneA).InversePoint(a);
+                var pc = b.RestWorld(boneB).InversePoint(c);
+                var p = b.Cone(front.Group, boneA, pa, 0.34, boneB, pc, 0.34, MaterialSlot.Primary, PatternDomain.None, 0, 1);
+                p.Flags |= PrimFlags.Thin | PrimFlags.Hard | PrimFlags.NoPattern | PrimFlags.NoShadow;
+                p.ShadeBias = shade;
+                p.MinDensity = hd;
+                p.Tag = tag;
+            }
+
+            // gills: the opening sits where the head meets the body, well behind the eye
+            double sk = head.SkullRadii.X;
+            double xg = skullC.X - sk * 0.45;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                if (form == "shark")
+                {
+                    int n = H > 4 ? 5 : 3;
+                    double gap = Math.Max(0.9, H * 0.16);
+                    for (int i = 0; i < n; i++)
+                    {
+                        double x = xg - i * gap;
+                        Vec3 lo = Surface(x - gap * 0.15, -0.42, side), hi = Surface(x + gap * 0.1, 0.36, side);
+                        Line(head.Head, lo, head.Head, hi, -2, "gillslit");
+                    }
+                }
+                else
+                {
+                    // gill cover edge: an arc bulging backwards (eels: just its middle)
+                    double t0 = form == "eel" ? -0.3 : -0.95, t1 = form == "eel" ? 0.3 : 0.8;
+                    const int seg = 4;
+                    Vec3 prev = default;
+                    for (int i = 0; i <= seg; i++)
+                    {
+                        double th = DMath.Lerp(t0, t1, i / (double)seg);
+                        Vec3 pt = Surface(xg - DMath.Cos(th) * sk * 0.25, th, side);
+                        if (i > 0) Line(head.Head, prev, head.Head, pt, -2, "gillcover");
+                        prev = pt;
+                    }
+                }
+
+                // lateral line from behind the gills to the root of the tail, arching above the midline; a row of
+                // pored scales that reads as a light thread
+                double x0 = xg - sk * 0.3, x1 = P.X - L * 0.3;
+                if (x0 - x1 < 2) continue;
+                int count = DMath.Clamp((int)Math.Round((x0 - x1) / Math.Max(2.5, L * 0.1)), 3, 9);
+                Vec3 last = default;
+                int lastBone = chest;
+                for (int i = 0; i <= count; i++)
+                {
+                    double t = i / (double)count;
+                    double x = DMath.Lerp(x0, x1, t);
+                    Vec3 pt = Surface(x, DMath.Lerp(0.42, 0.08, t), side);
+                    int bone = BoneFor(x);
+                    if (i > 0) Line(lastBone, last, bone, pt, 1, "lateralline");
+                    last = pt; lastBone = bone;
+                }
+            }
+        }
+
         /// <summary>Caudal fins with lobes (crescent: shark/tuna, forked, pointed).</summary>
         private static void BuildCaudal(AnatomyBuilder b, string shape, int prev, int tip, double H, double size)
         {
@@ -489,6 +607,15 @@ namespace PixelCreatures.Core.Families
                 var t = b.Triangle(g, prev, a, tip, c, tip, d, MaterialSlot.Membrane, PatternDomain.Fin);
                 t.Flags |= PrimFlags.Translucent | PrimFlags.TwoSided;
                 t.DomainLength = k;
+                // high density: rays fan from the base of the lobe to its free (rear) edge
+                int rays = shape == "pointed" ? 4 : 3;
+                for (int i = 0; i < rays; i++)
+                {
+                    double f = (i + 0.5) / rays;
+                    Vec3 from = shape == "pointed" ? Vec3.Lerp(a, d, f) * 0.8 : a * 0.6;
+                    Vec3 to = shape == "pointed" ? Vec3.Lerp(from, c, 0.9) : Vec3.Lerp(Vec3.Lerp(c, d, f * 0.85), from, 0.08);
+                    Fins.Ray(b, g, prev, from, tip, to, MaterialSlot.Membrane, 0, "caudal");
+                }
                 return t;
             }
             switch (shape)

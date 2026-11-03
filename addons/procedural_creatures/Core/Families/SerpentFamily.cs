@@ -231,11 +231,13 @@ namespace PixelCreatures.Core.Families
                 if (i < n) lengths[i] = seg;
             }
             int body = b.Group("body", DMath.Clamp(R * 0.45, 1.0, 3.0), 0, segGene > 0.4 ? GroupFlags.CreaseShade : GroupFlags.None);
+            var segments = new List<PrimitiveDef>();
             for (int i = 0; i < n; i++)
             {
                 var p = b.Segment(body, bones[i], radii[i], bones[i + 1], radii[i + 1], MaterialSlot.Primary, PatternDomain.Body, i / (double)n, (i + 1) / (double)n);
                 p.DomainLength = L;
                 p.Tag = "body";
+                segments.Add(p);
                 if (segGene > 0.35 && (i % 2 == 0))
                 {
                     // segment rings: slight bulges that show as creases
@@ -293,6 +295,9 @@ namespace PixelCreatures.Core.Families
                 DomainLength = L,
                 JawOpenMax = form == "viper" || form == "cobra" ? 1.1 : 0.7,
                 Nostrils = false,
+                // high density: keeled crown scales and loreal heat pits of pit vipers
+                CrownScales = form == "viper",
+                HeatPits = form == "viper",
             };
             var head = Heads.Build(b, hs);
             if (maw) BuildMaw(b, head, skullL, hs.SkullHeight, teeth == "ring", DMath.Lerp(0.8, 1.2, g.Get("head.jaw")));
@@ -381,6 +386,8 @@ namespace PixelCreatures.Core.Families
                 Dorsal.Build(b, ds);
             }
 
+            BuildHdDetail(b, form, body, bones, radii, seg, n, L, segments);
+
             // ---- rig semantics & metrics
             b.Rig.Locomotion = LocomotionKind.Serpentine;
             b.Rig.LocomotionModule = "serpentine";
@@ -407,6 +414,49 @@ namespace PixelCreatures.Core.Families
             double rearH = b.Rig.Tune("serpent.rear", 0) * Math.Max(4, b.Rig.Tune("serpent.raiseLength", 4) * 1.6) * 0.8;
             b.ExtraHeadroom = Math.Max(4, Math.Max(b.Rig.Tune("serpent.raise", 2), rearH) + skullL);
             return b.Build(g.AnatomyKey);
+        }
+
+        /// <summary>
+        /// High density body detail. Snakes: a row of broad, light ventral scales (gastrosteges) along the belly that
+        /// shows as a banded strip on the lower flank and fully when the snake rears up. Worms and sandworms: annulus
+        /// grooves around the body, shaded in the surface coordinates of the segments (an HD swap of each body
+        /// segment), so they stay continuous over the blended joints and leave the silhouette alone.
+        /// </summary>
+        private static void BuildHdDetail(AnatomyBuilder b, string form, int body, int[] bones, double[] radii, double seg, int n,
+            double L, List<PrimitiveDef> segments)
+        {
+            double hd = Limbs.HdDensity;
+            if (form == "worm" || form == "sandworm")
+            {
+                double annulus = DMath.Clamp(L / n * 0.34, 1.2, 2.4);
+                foreach (var p in segments)
+                {
+                    var ringed = b.HdSwap(p, hd);
+                    ringed.Flags |= PrimFlags.Annuli;
+                    ringed.DetailSize = annulus;
+                    ringed.Tag = "body.annuli";
+                }
+                return;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                double r0 = radii[i], r1 = radii[i + 1];
+                // bone frame: +X runs along the body towards the tail, +Y up
+                double spacing = Math.Max(1.1, Math.Min(r0, r1) * 0.62);
+                int m = DMath.Clamp((int)Math.Round(seg / spacing), 1, 3);
+                for (int j = 0; j < m; j++)
+                {
+                    double f = (j + 0.5) / m;
+                    double r = DMath.Lerp(r0, r1, f);
+                    // a little proud of the lower flank and a shade lighter, so the plates read in the belly shadow
+                    var p = b.Ellipsoid(body, bones[i], new Vec3(seg * f, -r * 0.42, 0), new Vec3(Math.Max(0.4, seg / m * 0.34), r * 0.62, r * 1.06), MaterialSlot.Secondary, PatternDomain.None);
+                    p.Flags |= PrimFlags.Hard | PrimFlags.NoShadow | PrimFlags.NoPattern;
+                    p.ShadeBias = 1;
+                    p.DomainLength = L;
+                    p.MinDensity = hd;
+                    p.Tag = "ventral";
+                }
+            }
         }
 
         /// <summary>Round lamprey-like maw at the front of the head, lined with a ring of teeth.</summary>

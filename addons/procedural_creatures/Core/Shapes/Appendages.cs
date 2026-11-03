@@ -351,6 +351,8 @@ namespace PixelCreatures.Core.Shapes
         public MaterialSlot Material = MaterialSlot.Accent;
         public string Name = "dorsal";
         public int BodyGroup = -1;
+        /// <summary>Sails: a fin ray along every anchor drawn at high pixel density.</summary>
+        public bool Rays;
     }
 
     public static class Dorsal
@@ -441,6 +443,14 @@ namespace PixelCreatures.Core.Shapes
                         var t2 = b.Triangle(g, boneA, xa.InversePoint(ta), boneB, xb.InversePoint(tb), boneB, xb.InversePoint(pb - nb * 0.4), MaterialSlot.Membrane, PatternDomain.Fin);
                         t1.Flags |= PrimFlags.Translucent; t2.Flags |= PrimFlags.Translucent;
                         t1.DomainLength = t2.DomainLength = s.Size;
+                    }
+                    if (s.Rays)
+                    {
+                        foreach (var (bone, pos, nrm, scale) in s.Anchors)
+                        {
+                            var xf = b.RestWorld(bone);
+                            Fins.Ray(b, g, bone, xf.InversePoint(pos - nrm * 0.4), bone, xf.InversePoint(pos + nrm * (s.Size * scale * 0.92)), MaterialSlot.Membrane, 0, s.Name);
+                        }
                     }
                     break;
                 }

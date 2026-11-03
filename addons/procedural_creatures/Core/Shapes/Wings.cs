@@ -38,6 +38,8 @@ namespace PixelCreatures.Core.Shapes
         public double Scallop = 0.18;
         /// <summary>Feathered: number of separated primary feathers at the tip.</summary>
         public int Primaries = 3;
+        /// <summary>Feathered: rows of covert feathers over the arm and forearm drawn at high pixel density (0 = none).</summary>
+        public int Coverts;
     }
 
     public static class Wings
@@ -229,6 +231,7 @@ namespace PixelCreatures.Core.Shapes
             c1.DomainLength = s.Span; c1.Flags |= PrimFlags.NoShadow; c1.Tag = N(s, side, "coverts");
             var c2 = b.Segment(gWing, foreB, r * 1.2, handB, r * 0.9, MaterialSlot.Primary, PatternDomain.Wing, 0.3, 0.6, side);
             c2.DomainLength = s.Span; c2.Flags |= PrimFlags.NoShadow; c2.Tag = N(s, side, "coverts");
+            if (s.Coverts > 0) BuildCovertRows(b, s, side, armB, foreB, root, elbow, wrist, rootT, elbowT, wristT);
             var rig = new WingRig
             {
                 Side = side, Kind = WingKind.Feathered, ArmBone = armB, ForearmBone = foreB, HandBone = handB,
@@ -247,6 +250,51 @@ namespace PixelCreatures.Core.Shapes
             var handF = FoldBasis(axisBack + belly * 0.05 + outV * 0.03, trail);
             SetFoldTargets(b, rig, s.AnchorBone, armF, foreF, handF);
             return rig;
+        }
+
+        /// <summary>
+        /// High density covert feathers: overlapping rows of feather tips over the arm and forearm, pointing to
+        /// the trailing edge (lesser coverts near the leading edge, greater coverts behind them). Each row is its
+        /// own group lying just above the upper wing surface, so its saw-tooth rear edge gets a contour line; seen
+        /// from below the wing plates hide them.
+        /// </summary>
+        private static void BuildCovertRows(AnatomyBuilder b, WingSpec s, int side, int armB, int foreB,
+            Vec3 root, Vec3 elbow, Vec3 wrist, Vec3 rootT, Vec3 elbowT, Vec3 wristT)
+        {
+            Vec3 nrm = Vec3.Cross(elbow - root, rootT - root).NormalizedOr(Vec3.UnitY);
+            if (nrm.Y < 0) nrm = -nrm;
+            double lift = Math.Max(0.35, s.Chord * 0.03);
+            Vec3 Lerp3(Vec3 a, Vec3 m, Vec3 c, double t) => t < 0.5 ? Vec3.Lerp(a, m, t * 2) : Vec3.Lerp(m, c, t * 2 - 1);
+            // t runs along the wing from the shoulder (0) over the elbow (0.5) to the wrist (1); d across the chord
+            Vec3 At(double t, double d) => Vec3.Lerp(Lerp3(root, elbow, wrist, t), Lerp3(rootT, elbowT, wristT, t), d) + nrm * lift;
+            int BoneAt(double t) => t < 0.5 ? armB : foreB;
+            double length = (elbow - root).Length + (wrist - elbow).Length;
+            int rows = Math.Min(3, s.Coverts);
+            for (int r = 0; r < rows; r++)
+            {
+                int g = b.Group(N(s, side, "coverts" + r), 0.2, side, GroupFlags.NoFarShade, 0.18 + 0.06 * (rows - r));
+                double d0 = 0.12 + r * 0.22, depth = 0.2 + r * 0.04;
+                // feathers get longer and broader towards the trailing edge
+                double width = Math.Max(1.3, s.Chord * (0.16 + 0.05 * r));
+                int n = DMath.Clamp((int)Math.Round(length / width), 3, 10);
+                for (int i = 0; i < n; i++)
+                {
+                    double t0 = Math.Max(0.02, (i - 0.1) / n), t1 = Math.Min(0.98, (i + 1.1) / n);
+                    double tm = (i + 0.35) / n; // tips lean towards the body
+                    Vec3 a = At(t0, d0), c = At(t1, d0), tip = At(tm, d0 + depth);
+                    var xa = b.RestWorld(BoneAt(t0));
+                    var xc = b.RestWorld(BoneAt(t1));
+                    var xt = b.RestWorld(BoneAt(tm));
+                    var tri = b.Triangle(g, BoneAt(t0), xa.InversePoint(a), BoneAt(tm), xt.InversePoint(tip), BoneAt(t1), xc.InversePoint(c),
+                        MaterialSlot.Primary, PatternDomain.Wing, side);
+                    tri.Flags |= PrimFlags.TwoSided | PrimFlags.NoShadow;
+                    tri.U0 = t0 * 0.6; tri.U1 = t1 * 0.6;
+                    tri.DomainLength = s.Span;
+                    tri.MinDensity = Limbs.HdDensity;
+                    tri.Tag = N(s, side, "covert");
+                    b.Defer(tri);
+                }
+            }
         }
 
         /// <summary>Right-handed basis with X along x and Z as close as possible to z.</summary>

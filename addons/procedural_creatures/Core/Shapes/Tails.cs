@@ -53,6 +53,8 @@ namespace PixelCreatures.Core.Shapes
         public PrimFlags Flags;
         /// <summary>Flatten the chain cross-section (fins, leaves): scales radius in Z.</summary>
         public bool Thin;
+        /// <summary>Fin tips: rays per lobe drawn at high pixel density (0 = none).</summary>
+        public int TipRays;
     }
 
     public static class Chains
@@ -184,6 +186,14 @@ namespace PixelCreatures.Core.Shapes
                     var t2 = b.Triangle(g2, prevBone, new Vec3(0, 0, 0), tipBone, new Vec3(l, -h, 0), tipBone, new Vec3(l * 0.55, 0, 0), slot, PatternDomain.Fin);
                     t1.Flags |= PrimFlags.Translucent; t2.Flags |= PrimFlags.Translucent;
                     t1.DomainLength = t2.DomainLength = l;
+                    // high density: rays fan from the base of the fin to its forked rear edge
+                    for (int lobe = -1; lobe <= 1 && s.TipRays > 0; lobe += 2)
+                        for (int ri = 0; ri < s.TipRays; ri++)
+                        {
+                            double t = (ri + 0.5) / s.TipRays * 0.9;
+                            Vec3 end = Vec3.Lerp(new Vec3(l, lobe * h, 0), new Vec3(l * 0.55, 0, 0), t);
+                            Fins.Ray(b, g2, prevBone, new Vec3(0, lobe * h * 0.06, 0), tipBone, Vec3.Lerp(Vec3.Zero, end, 0.92), slot, s.Side, s.Name + ".fin");
+                        }
                     break;
                 }
                 case TailTip.Rattle:

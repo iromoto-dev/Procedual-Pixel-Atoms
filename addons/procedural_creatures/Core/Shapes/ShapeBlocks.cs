@@ -78,6 +78,14 @@ namespace PixelCreatures.Core.Shapes
             return basis.Mul(g).NormalizedOr(Vec3.UnitY);
         }
 
+        /// <summary>Rotation of an orthonormal frame whose local Y follows y and local X lies as close as possible to x.</summary>
+        public static Quat Orientation(Vec3 x, Vec3 y)
+        {
+            Vec3 by = y.NormalizedOr(Vec3.UnitY);
+            Vec3 bx = (x - by * Vec3.Dot(by, x)).NormalizedOr(Math.Abs(by.X) < 0.9 ? Vec3.UnitX : Vec3.UnitZ);
+            return AnatomyBuilder.QuatFromBasis(new Mat3(bx, by, Vec3.Cross(bx, by)));
+        }
+
         /// <summary>Rotates v around the Z axis (pitch in the creature's sagittal plane).</summary>
         public static Vec3 Pitch(Vec3 v, double angle)
         {
