@@ -6,9 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.Json.Serialization.Metadata;
+using PixelCreatures.Core.Json;
 
 namespace PixelCreatures.Tests
 {
@@ -159,7 +157,7 @@ namespace PixelCreatures.Tests
                 ["failed"] = Failed,
                 ["results"] = arr,
             };
-            return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, TypeInfoResolver = new DefaultJsonTypeInfoResolver() });
+            return root.ToJsonString();
         }
 
         public string Summary()

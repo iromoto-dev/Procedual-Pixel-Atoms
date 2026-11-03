@@ -242,7 +242,43 @@ namespace PixelCreatures.Core
             double t = r * r;
             double c = r - t * (P1 + t * (P2 + t * (P3 + t * (P4 + t * P5))));
             double y = 1.0 - ((lo - (r * c) / (2.0 - c)) - hi);
-            return Math.ScaleB(y, k);
+            return ScaleB(y, k);
+        }
+
+        /// <summary>
+        /// x * 2^n, exact and correctly rounded (port of musl scalbn, identical to .NET's Math.ScaleB). Pure
+        /// bit arithmetic and multiplications, available on every runtime (Unity Mono/IL2CPP lack ScaleB).
+        /// </summary>
+        private static readonly double TwoP1023 = BitConverter.Int64BitsToDouble(0x7FE0000000000000L);
+        private static readonly double TwoPm969 = BitConverter.Int64BitsToDouble(0x0360000000000000L);
+
+        public static double ScaleB(double x, int n)
+        {
+            double y = x;
+            if (n > 1023)
+            {
+                y *= TwoP1023;
+                n -= 1023;
+                if (n > 1023)
+                {
+                    y *= TwoP1023;
+                    n -= 1023;
+                    if (n > 1023) n = 1023;
+                }
+            }
+            else if (n < -1022)
+            {
+                // 0x1p-1022 * 0x1p53: scale down in two steps so the result is rounded only once
+                y *= TwoPm969;
+                n += 1022 - 53;
+                if (n < -1022)
+                {
+                    y *= TwoPm969;
+                    n += 1022 - 53;
+                    if (n < -1022) n = -1022;
+                }
+            }
+            return y * BitConverter.Int64BitsToDouble((long)(0x3ff + n) << 52);
         }
 
         private const double Lg1 = 6.666666666666735130e-01;

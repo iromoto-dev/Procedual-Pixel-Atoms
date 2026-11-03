@@ -57,7 +57,7 @@ namespace PixelCreatures.Runtime
         };
 
         /// <summary>Family name prefixed with its category, for pickers ("Flora: Trees & Flora").</summary>
-        public static string FamilyLabel(ICreatureFamily f) => $"{CategoryLabel(f.Category)}: {f.DisplayName}";
+        public static string FamilyLabel(ICreatureFamily f) => $"{CategoryLabel(CreatureFamilies.CategoryOf(f))}: {f.DisplayName}";
 
         public static CreatureGenome Sample(string familyId, ulong seed) => GenomeFactory.Sample(Registry.GetFamily(familyId), seed);
 

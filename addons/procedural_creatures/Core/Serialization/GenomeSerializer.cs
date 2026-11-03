@@ -19,10 +19,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.Json.Serialization.Metadata;
 using PixelCreatures.Core.Genetics;
+using PixelCreatures.Core.Json;
 
 namespace PixelCreatures.Core.Serialization
 {
@@ -138,7 +136,7 @@ namespace PixelCreatures.Core.Serialization
                 ["notes"] = meta.Notes,
                 ["tags"] = new JsonArray(meta.Tags.Select(t => (JsonNode)JsonValue.Create(t)!).ToArray()),
             };
-            return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, TypeInfoResolver = new DefaultJsonTypeInfoResolver() }) + "\n";
+            return root.ToJsonString() + "\n";
         }
 
         // ------------------------------------------------------------------ read
@@ -149,7 +147,7 @@ namespace PixelCreatures.Core.Serialization
             JsonNode? node;
             try
             {
-                node = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip, MaxDepth = 32 });
+                node = JsonNode.Parse(json, maxDepth: 32);
             }
             catch (JsonException e)
             {

@@ -38,7 +38,8 @@ namespace PixelCreatures.Core
             return h;
         }
 
-        public static ulong Fnv1a64(ReadOnlySpan<byte> bytes, ulong h = FnvOffset)
+        /// <summary>FNV-1a over a byte array (arrays rather than spans: identical on every Unity runtime and API profile).</summary>
+        public static ulong Fnv1a64(byte[] bytes, ulong h = FnvOffset)
         {
             for (int i = 0; i < bytes.Length; i++)
             {

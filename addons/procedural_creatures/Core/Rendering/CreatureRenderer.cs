@@ -114,6 +114,9 @@ namespace PixelCreatures.Core.Rendering
         private sbyte[] _levelTmp = Array.Empty<sbyte>();
         private byte[] _matTmp = Array.Empty<byte>();
         private byte[] _shadowMask = Array.Empty<byte>();
+        // scratch counters of the shading cleanup (arrays instead of stackalloc spans: portable to every Unity runtime)
+        private readonly int[] _shadeCounts = new int[8];
+        private readonly int[] _matCounts = new int[(int)MaterialSlot.Count];
 
         private const byte FlagCovered = 1;
         private const byte FlagFillet = 2;
@@ -1367,8 +1370,8 @@ namespace PixelCreatures.Core.Rendering
                 Array.Copy(_level, row + rx0, _levelTmp, row + rx0, rx1 - rx0 + 1);
                 Array.Copy(_mat, row + rx0, _matTmp, row + rx0, rx1 - rx0 + 1);
             }
-            Span<int> counts = stackalloc int[8];
-            Span<int> matCounts = stackalloc int[(int)MaterialSlot.Count];
+            var counts = _shadeCounts;
+            var matCounts = _matCounts;
             for (int y = Math.Max(1, ry0); y <= Math.Min(_h - 2, ry1); y++)
             {
                 for (int x = Math.Max(1, rx0); x <= Math.Min(_w - 2, rx1); x++)
@@ -1376,7 +1379,7 @@ namespace PixelCreatures.Core.Rendering
                     int i = y * _w + x;
                     if ((_pflags[i] & FlagCovered) == 0 || (_pflags[i] & FlagThin) != 0) continue;
                     // --- isolated material pixel (pattern speck) inside one group
-                    matCounts.Clear();
+                    Array.Clear(matCounts, 0, matCounts.Length);
                     int sameGroup = 0;
                     int g = _group[i];
                     int differentMat = 0;
@@ -1396,7 +1399,7 @@ namespace PixelCreatures.Core.Rendering
                     }
 
                     // --- isolated shade pixel
-                    counts.Clear();
+                    Array.Clear(counts, 0, counts.Length);
                     int same = 0, total = 0;
                     for (int k = 0; k < 4; k++)
                     {

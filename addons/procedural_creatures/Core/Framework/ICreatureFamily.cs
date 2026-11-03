@@ -43,10 +43,25 @@ namespace PixelCreatures.Core
         void CustomizeSurface(CreatureGenome genome, Palettes.SurfaceSpec surface);
     }
 
+    /// <summary>
+    /// Optional family interface: the broad category (creature, mythical, monster, flora, prop). Families
+    /// without it count as creatures. A separate interface rather than a default interface member keeps
+    /// the API usable on every Unity scripting backend.
+    /// </summary>
+    public interface ICategorizedFamily
+    {
+        CreationCategory Category { get; }
+    }
+
+    public static class CreatureFamilies
+    {
+        /// <summary>Category of any family (Creature unless it implements ICategorizedFamily).</summary>
+        public static CreationCategory CategoryOf(ICreatureFamily family) =>
+            family is ICategorizedFamily c ? c.Category : CreationCategory.Creature;
+    }
+
     public interface ICreatureFamily
     {
-        /// <summary>Broad category (creature, mythical, monster, flora, prop). Defaults to Creature.</summary>
-        CreationCategory Category => CreationCategory.Creature;
 
         /// <summary>Stable id stored in genomes (never rename; add a migration instead).</summary>
         string Id { get; }
@@ -69,7 +84,7 @@ namespace PixelCreatures.Core
     }
 
     /// <summary>Convenience base class for families.</summary>
-    public abstract class CreatureFamilyBase : ICreatureFamily
+    public abstract class CreatureFamilyBase : ICreatureFamily, ICategorizedFamily
     {
         private GeneSchema? _schema;
 

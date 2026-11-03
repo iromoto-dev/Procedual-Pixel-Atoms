@@ -31,6 +31,7 @@ namespace PixelCreatures.Core.Motion
         private double _fidgetSign = 1;
         public FidgetKind Fidget { get; private set; }
         private readonly bool _hasEars, _hasTail, _hasHead, _hasJaw;
+        private readonly double[] _fidgetWeights = new double[8];
 
         public IdleLife(MotorContext ctx)
         {
@@ -87,7 +88,7 @@ namespace PixelCreatures.Core.Motion
         private FidgetKind PickFidget(MotorContext ctx, int k)
         {
             double cur = ctx.Traits.Curiosity, en = ctx.Traits.Energy;
-            Span<double> w = stackalloc double[8];
+            var w = _fidgetWeights;
             w[(int)FidgetKind.LookAround] = _hasHead ? 1.0 + 1.5 * cur : 0;
             w[(int)FidgetKind.EarFlick] = _hasEars ? 1.0 + en : 0;
             w[(int)FidgetKind.TailSwish] = _hasTail ? 1.0 + en : 0;

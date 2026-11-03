@@ -1,5 +1,7 @@
 // Procedural Pixel Creatures - minimal, dependency free PNG encoder (RGBA8, zlib via .NET).
-// Used by exporters and tools so that output does not depend on the engine.
+// Used by exporters and tools so that output does not depend on the engine. Only .NET Standard 2.0 APIs
+// are used (Godot, Unity Mono and IL2CPP): the zlib stream is assembled from DeflateStream plus the zlib
+// header and Adler-32 trailer, with uncompressed deflate blocks where a platform has no deflate.
 
 using System;
 using System.IO;
@@ -45,7 +47,7 @@ namespace PixelCreatures.Core.Export
             WriteChunk(ms, "IHDR", ihdr);
             foreach (var (key, value) in text)
             {
-                byte[] k = Encoding.Latin1.GetBytes(key);
+                byte[] k = Latin1(key);
                 byte[] v = Encoding.UTF8.GetBytes(value);
                 var payload = new byte[k.Length + 1 + v.Length];
                 Array.Copy(k, payload, k.Length);
@@ -59,15 +61,75 @@ namespace PixelCreatures.Core.Export
                 raw[y * (width * 4 + 1)] = 0;
                 Array.Copy(rgba, y * width * 4, raw, y * (width * 4 + 1) + 1, width * 4);
             }
-            byte[] compressed;
-            using (var cms = new MemoryStream())
-            {
-                using (var z = new ZLibStream(cms, CompressionLevel.Optimal, true)) z.Write(raw, 0, raw.Length);
-                compressed = cms.ToArray();
-            }
-            WriteChunk(ms, "IDAT", compressed);
+            WriteChunk(ms, "IDAT", ZLib(raw));
             WriteChunk(ms, "IEND", Array.Empty<byte>());
             return ms.ToArray();
+        }
+
+        /// <summary>PNG keywords are Latin-1; characters outside it become '?'.</summary>
+        private static byte[] Latin1(string s)
+        {
+            var b = new byte[s.Length];
+            for (int i = 0; i < s.Length; i++) b[i] = s[i] <= 0xFF ? (byte)s[i] : (byte)'?';
+            return b;
+        }
+
+        /// <summary>zlib stream (RFC 1950): header, deflate data, Adler-32 of the uncompressed data.</summary>
+        public static byte[] ZLib(byte[] data)
+        {
+            byte[] deflated;
+            byte level;
+            try
+            {
+                using var cms = new MemoryStream();
+                using (var z = new DeflateStream(cms, CompressionLevel.Optimal, true)) z.Write(data, 0, data.Length);
+                deflated = cms.ToArray();
+                level = 0xDA;
+            }
+            catch (Exception e) when (e is PlatformNotSupportedException || e is NotSupportedException || e is DllNotFoundException || e is EntryPointNotFoundException || e is TypeInitializationException)
+            {
+                deflated = StoredBlocks(data);
+                level = 0x01;
+            }
+            var o = new byte[2 + deflated.Length + 4];
+            o[0] = 0x78;
+            o[1] = level;
+            Array.Copy(deflated, 0, o, 2, deflated.Length);
+            WriteBE(o, o.Length - 4, Adler32(data));
+            return o;
+        }
+
+        /// <summary>Uncompressed deflate blocks (RFC 1951, BTYPE 00): valid everywhere, no compression.</summary>
+        private static byte[] StoredBlocks(byte[] data)
+        {
+            using var ms = new MemoryStream();
+            int offset = 0;
+            do
+            {
+                int n = Math.Min(65535, data.Length - offset);
+                bool last = offset + n >= data.Length;
+                ms.WriteByte(last ? (byte)1 : (byte)0);
+                ms.WriteByte((byte)(n & 0xFF)); ms.WriteByte((byte)(n >> 8));
+                ms.WriteByte((byte)(~n & 0xFF)); ms.WriteByte((byte)((~n >> 8) & 0xFF));
+                ms.Write(data, offset, n);
+                offset += n;
+            }
+            while (offset < data.Length);
+            return ms.ToArray();
+        }
+
+        private static uint Adler32(byte[] data)
+        {
+            const uint Mod = 65521;
+            uint a = 1, b = 0;
+            int i = 0;
+            while (i < data.Length)
+            {
+                int n = Math.Min(5552, data.Length - i);
+                for (int k = 0; k < n; k++) { a += data[i++]; b += a; }
+                a %= Mod; b %= Mod;
+            }
+            return (b << 16) | a;
         }
 
         private static void WriteChunk(Stream s, string type, byte[] data)

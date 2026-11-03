@@ -11,11 +11,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using PixelCreatures.Core.Anatomy;
+using PixelCreatures.Core.Json;
 using PixelCreatures.Core.Motion;
 using PixelCreatures.Core.Palettes;
 using PixelCreatures.Core.Rendering;
@@ -354,7 +352,7 @@ namespace PixelCreatures.Core.Export
                 ["palette"] = palette,
                 ["clips"] = clips,
             };
-            return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, TypeInfoResolver = new DefaultJsonTypeInfoResolver() });
+            return root.ToJsonString();
         }
     }
 }
