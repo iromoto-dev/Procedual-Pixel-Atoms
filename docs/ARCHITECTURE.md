@@ -240,9 +240,24 @@ the chains and opens jaws such as chest lids) and their rest is `Dormant` (calme
 - **Test area** (`workshop/TestArea`): `EnvironmentArt.GenerateMap` generates the map deterministically from
   size and seed – ponds with coves and sandy shores, paths, meadows, props at an even density, minimap –
   using managed buffers only, in parallel row by row and cancelable, on a worker thread; images and textures
-  are created afterwards on the main thread. Props share a few texture variants, and the water shimmer
-  is stored as four pre-uploaded frames per pond. New creatures are spawned with a time budget
-  of 4 ms per frame.
+  are created afterwards on the main thread. The water shimmer is stored as four pre-uploaded frames per
+  pond. New creatures are spawned with a time budget of 4 ms per frame.
+- **Test area scenery** (`workshop/Environment/Scenery.cs`): with the default procedural style, every prop
+  spot shows a `flora` or `prop` creation. The generator samples two or three genomes per form from the
+  map seed (rejection-sampling seeds until the family picks that archetype) and builds them in parallel on
+  its worker thread; spots pick a form by habitat (willows by the water, conifers and crystals on the
+  hills, signposts and lanterns along paths, mushrooms in dark patches) plus a facing and a wind phase.
+  The solid base of each creation – a per-form share of `Metrics.HorizontalRadius` (trunks for trees,
+  nearly the whole reach for rocks and crates), foreshortened to an ellipse – is cleared from
+  `TestMap.Clearance`, so `CanOccupy`/`CanTravel` route creatures around it. The test area creates one
+  `CreatureActor` per spot (nearest to the camera first, everything in view at once, the rest within the
+  spawn budget) with `CullOffscreen`, 6 poses/s and the creatures' pixel density, placed with the same
+  projection as creatures so it y-sorts against them and the cliff faces. Scenery outside the view plus
+  a margin is put to sleep (`ProcessMode.Disabled`) once it has culled itself, so hundreds of trees on the
+  large maps cost nothing until the camera comes near; creations without wind-driven parts (no trunk lean,
+  no Tentacle chains: rocks, crates, gravestones) are paused and only rasterized when they come into view.
+  The classic style (`P`, `--scenery=classic`) keeps the same layout with shared static textures and small
+  square footprints.
 
 ### Thread rules
 

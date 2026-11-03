@@ -1,7 +1,9 @@
 // Procedural Pixel Creature Workshop - scalable map of the test area: ponds with sandy shores, winding
 // paths, grass with light meadows and darker patches, props (trees, bushes, rocks) and a minimap image.
-// Deterministic for (size, seed). Generation only touches managed buffers - no engine calls - so it can
-// run on a worker thread; the test area turns the buffers into images and textures.
+// Props are either procedural scenery (flora and prop creations, see Scenery.cs) or static textures.
+// Deterministic for (size, seed, style). Generation only touches managed buffers and core models - no
+// engine calls - so it can run on a worker thread; the test area turns the buffers into images, textures
+// and actors.
 
 using System;
 using System.Collections.Generic;
@@ -49,7 +51,14 @@ namespace PixelCreatures.Workshop
     {
         public int X, Y;
         public PropKind Kind;
+        /// <summary>Static texture variant (classic style, and the fallback for spots without scenery).</summary>
         public int Variant;
+        /// <summary>Index into <see cref="TestMap.Scenery"/> (procedural style), -1 = static texture.</summary>
+        public int Scenery;
+        /// <summary>Facing direction (0..7, 6 = towards the viewer) of the procedural scenery.</summary>
+        public int Facing;
+        /// <summary>Wind phase of the procedural scenery (seconds): spots that share a variant sway out of step.</summary>
+        public float Phase;
     }
 
     public sealed class PondSpec
@@ -79,6 +88,9 @@ namespace PixelCreatures.Workshop
         public readonly List<ReliefFace> Cliffs = new List<ReliefFace>();
         public readonly List<PondSpec> Ponds = new List<PondSpec>();
         public readonly List<PropSpot> Props = new List<PropSpot>();
+        /// <summary>How the props are shown; procedural maps carry the built flora and prop creations in <see cref="Scenery"/>.</summary>
+        public SceneryStyle Style;
+        public readonly List<SceneryVariant> Scenery = new List<SceneryVariant>();
         public int MiniWidth, MiniHeight;
         public byte[] MiniRgba = Array.Empty<byte>();
         public double GenerateMs;
@@ -95,6 +107,25 @@ namespace PixelCreatures.Workshop
         }
 
         public Vector2 Project(Vector2 p) => p - new Vector2(0, HeightAt(p));
+
+        /// <summary>The flora or prop creation of a spot, null for a static texture.</summary>
+        public SceneryVariant? SceneryOf(in PropSpot p) => p.Scenery >= 0 && p.Scenery < Scenery.Count ? Scenery[p.Scenery] : null;
+
+        /// <summary>
+        /// Blocked area of a prop in map pixels (half extents around the spot). Procedural scenery blocks its solid
+        /// footprint, a circle on the ground plane that the camera foreshortens to an ellipse; static props a square.
+        /// </summary>
+        public Vector2 FootprintExtents(in PropSpot p)
+        {
+            var v = SceneryOf(p);
+            if (v == null)
+            {
+                int r = p.Kind == PropKind.Tree ? 3 : p.Kind == PropKind.Rock ? 4 : 2;
+                return new Vector2(r, r);
+            }
+            float rx = (float)v.Footprint;
+            return new Vector2(rx, rx * (float)DMath.Sin(PixelCamera.DefaultElevation));
+        }
 
         /// <summary>Checks the whole footprint, including banks, cliffs and solid prop bases.</summary>
         public bool CanOccupy(Vector2 p, bool aquatic, bool flying, float radius = 5)
@@ -150,13 +181,15 @@ namespace PixelCreatures.Workshop
 
         /// <summary>
         /// Generates a test area map of width x height screen pixels. Runs the per-pixel work in parallel
-        /// (row by row, results identical to a sequential run) and can be cancelled.
+        /// (row by row, results identical to a sequential run) and can be cancelled. The procedural style also
+        /// samples and builds the flora and prop creations of the props (see <see cref="AssignScenery"/>); spot
+        /// positions and kinds are the same in both styles.
         /// </summary>
-        public static TestMap GenerateMap(int width, int height, ulong seed, CancellationToken cancel = default)
+        public static TestMap GenerateMap(int width, int height, ulong seed, CancellationToken cancel = default, SceneryStyle style = SceneryStyle.Procedural)
         {
             var sw = Stopwatch.StartNew();
             int w = Math.Max(64, width), h = Math.Max(64, height);
-            var map = new TestMap { Width = w, Height = h, Seed = seed, Terrain = new byte[w * h], GroundRgba = new byte[w * h * 4] };
+            var map = new TestMap { Width = w, Height = h, Seed = seed, Style = style, Terrain = new byte[w * h], GroundRgba = new byte[w * h * 4] };
             PlacePonds(map, new Rng(seed ^ 0x504F4E44UL));
             var rowPaths = HorizontalPaths(w, h, seed);
             var columnPaths = VerticalPaths(w, h, seed);
@@ -169,6 +202,7 @@ namespace PixelCreatures.Workshop
             foreach (var pond in map.Ponds) pond.GlintFrames = Glints(map, pond);
             cancel.ThrowIfCancellationRequested();
             PlaceProps(map, new Rng(seed ^ 0x50524F50UL));
+            if (style == SceneryStyle.Procedural) AssignScenery(map, cancel);
             BuildClearance(map);
             BuildMinimap(map);
             map.GenerateMs = sw.Elapsed.TotalMilliseconds;
@@ -429,7 +463,7 @@ namespace PixelCreatures.Workshop
                 double r = rng.NextDouble();
                 var kind = r < 0.45 ? PropKind.Tree : (r < 0.75 ? PropKind.Bush : PropKind.Rock);
                 int variants = kind == PropKind.Tree ? TreeVariants : (kind == PropKind.Bush ? BushVariants : RockVariants);
-                map.Props.Add(new PropSpot { X = x, Y = y, Kind = kind, Variant = rng.NextInt(variants) });
+                map.Props.Add(new PropSpot { X = x, Y = y, Kind = kind, Variant = rng.NextInt(variants), Scenery = -1, Facing = 6 });
             }
         }
 

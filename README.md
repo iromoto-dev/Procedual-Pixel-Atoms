@@ -36,7 +36,7 @@ The first setup needs an internet connection; subsequent starts reuse the downlo
 | **Workshop** | Edit individual genes, lock traits, reroll the rest, undo/redo, inspect rigs and foot contacts, and preview animation with a fixed camera. |
 | **Genetics** | Generate four animated offspring with adjustable mutation strength, or combine two compatible parents. |
 | **Overview** | Generate 1–100 creatures, filter by family or archetype, keep favorites during rerolls, and send any creature back to the editor. |
-| **Test area** | Explore five map sizes with terraced hills, slopes, cliffs, vegetation and ponds. Land creatures follow the terrain; aquatic creatures swim below the water surface. |
+| **Test area** | Explore five map sizes with terraced hills, slopes, cliffs, vegetation and ponds. Trees, bushes and rocks are procedural flora and prop creations that sway in the wind (or classic static sprites). Land creatures follow the terrain; aquatic creatures swim below the water surface. |
 | **Export** | Save versioned JSON presets, transparent PNGs, or HD sprite sheets with animation metadata and a playback preview. |
 | **Framework** | Use the engine-independent C# core or Godot `CreatureActor` in your own project. Plantfolk demonstrate how to add a family through the public extension API. |
 
@@ -170,6 +170,7 @@ for platform requirements. Native release binaries are not included or validated
 | + / − or population buttons | Change population from 1 to 100 |
 | Page Up / Page Down | Increase / decrease map size |
 | N / G | Generate a new map / reroll the population |
+| P | Procedural scenery (flora and props that sway) or classic static sprites |
 | Mouse wheel | Zoom |
 | Right- or middle-button drag | Pan the camera |
 | F | Follow the controlled creature again |

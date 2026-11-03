@@ -165,9 +165,16 @@ namespace PixelCreatures.Workshop
                 }
             foreach (var p in map.Props)
             {
-                int r = p.Kind == PropKind.Tree ? 3 : p.Kind == PropKind.Rock ? 4 : 2;
-                for (int y = Math.Max(0, p.Y - r); y <= Math.Min(h - 1, p.Y + r); y++)
-                    for (int x = Math.Max(0, p.X - r); x <= Math.Min(w - 1, p.X + r); x++) d[y * w + x] = 0;
+                var e = map.FootprintExtents(p);
+                int rx = (int)Math.Ceiling(e.X), ry = (int)Math.Ceiling(e.Y);
+                // static props block a square; scenery its elliptical base (the spot itself is always solid)
+                bool square = map.SceneryOf(p) == null;
+                for (int y = Math.Max(0, p.Y - ry); y <= Math.Min(h - 1, p.Y + ry); y++)
+                    for (int x = Math.Max(0, p.X - rx); x <= Math.Min(w - 1, p.X + rx); x++)
+                    {
+                        float dx = (x - p.X) / Math.Max(1f, e.X), dy = (y - p.Y) / Math.Max(1f, e.Y);
+                        if (square || dx * dx + dy * dy <= 1f) d[y * w + x] = 0;
+                    }
             }
             // Chebyshev distance is conservative: a square footprint is fully clear of obstacles.
             for (int y = 1; y < h; y++)

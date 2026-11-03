@@ -371,6 +371,7 @@ namespace PixelCreatures.Tests
                 ctx.True(map.Props.Count >= expected * 0.8 && map.Props.Count <= expected, $"{size}: {map.Props.Count} props, expected about {expected}");
                 foreach (var p in map.Props)
                     ctx.True(map.Terrain[p.Y * map.Width + p.X] == TestMap.Grass, $"{size}: prop at {p.X},{p.Y} not on grass");
+                CheckScenery(ctx, map, size.ToString());
                 ctx.True(map.Ponds.Count >= Math.Max(1, (int)Math.Round(size.Width * (double)size.Height / 300000.0) - 1), $"{size}: only {map.Ponds.Count} ponds");
                 foreach (var pond in map.Ponds)
                 {
@@ -386,6 +387,18 @@ namespace PixelCreatures.Tests
             ctx.True(a.GroundRgba.AsSpan().SequenceEqual(b2.GroundRgba) && a.Terrain.AsSpan().SequenceEqual(b2.Terrain) && a.Props.Count == b2.Props.Count,
                 "the same seed must produce the same map (parallel generation)");
             ctx.True(a.Elevation.AsSpan().SequenceEqual(b2.Elevation) && a.Clearance.AsSpan().SequenceEqual(b2.Clearance), "height and navigation are deterministic");
+            ctx.True(a.Props.Select(p => (a.SceneryOf(p)?.Genome.ContentHash, p.Facing, p.Phase)).SequenceEqual(b2.Props.Select(p => (b2.SceneryOf(p)?.Genome.ContentHash, p.Facing, p.Phase))),
+                "scenery creations, facings and wind phases are deterministic");
+            // the classic style keeps the layout and the ground, with static textures and their small square footprints
+            var classic = EnvironmentArt.GenerateMap(960, 600, 77, default, SceneryStyle.Classic);
+            ctx.True(classic.Style == SceneryStyle.Classic && classic.Scenery.Count == 0 && classic.Props.All(p => classic.SceneryOf(p) == null), "classic style: static props only");
+            ctx.True(classic.Props.Select(p => (p.X, p.Y, p.Kind, p.Variant)).SequenceEqual(a.Props.Select(p => (p.X, p.Y, p.Kind, p.Variant))) && classic.GroundRgba.AsSpan().SequenceEqual(a.GroundRgba),
+                "scenery style changes the props, not the layout or the ground");
+            foreach (var p in classic.Props)
+            {
+                var e = classic.FootprintExtents(p);
+                ctx.True(e.X == e.Y && e.X <= 4 && classic.Clearance[p.Y * classic.Width + p.X] == 0, "classic props keep their square footprint");
+            }
             var c = EnvironmentArt.GenerateMap(960, 600, 78);
             ctx.True(!a.Terrain.AsSpan().SequenceEqual(c.Terrain), "a different seed must produce a different map");
             using var cancel = new CancellationTokenSource();
@@ -395,6 +408,57 @@ namespace PixelCreatures.Tests
             catch (OperationCanceledException) { cancelled = true; }
             ctx.True(cancelled, "canceled generation must throw OperationCanceledException");
             return Task.CompletedTask;
+        }
+
+        private static readonly HashSet<string> TreeForms = new HashSet<string> { "oak", "pine", "birch", "willow", "palm", "dead", "blossom" };
+        private static readonly HashSet<string> UndergrowthForms = new HashSet<string> { "bush", "flowers", "mushroom" };
+
+        /// <summary>
+        /// Procedural scenery of a map: every prop spot shows a stationary flora or prop creation that keeps the role of
+        /// the spot (trees are trees, rocks are objects), and its solid base - a share of the anatomy's horizontal reach,
+        /// foreshortened to an ellipse - is blocked in the clearance map, so creatures walk around it.
+        /// </summary>
+        private static void CheckScenery(TestContext ctx, TestMap map, string label)
+        {
+            ctx.True(map.Style == SceneryStyle.Procedural && map.Scenery.Count > 0, $"{label}: procedural scenery by default");
+            int placed = 0, blockedProblems = 0, roleProblems = 0;
+            var forms = new HashSet<string>();
+            double sinE = Math.Sin(PixelCamera.DefaultElevation);
+            foreach (var p in map.Props)
+            {
+                var v = map.SceneryOf(p);
+                if (v == null) continue;
+                placed++;
+                forms.Add(v.Form);
+                var anatomy = v.Model.Anatomy;
+                ctx.True(anatomy.Rig.Stationary && anatomy.Rig.LocomotionModule == "rooted", $"{label}: {v.Form} is a stationary, rooted creation");
+                bool role = p.Kind switch
+                {
+                    PropKind.Tree => v.FamilyId == "flora" && TreeForms.Contains(v.Form),
+                    PropKind.Bush => v.FamilyId == "flora" && UndergrowthForms.Contains(v.Form),
+                    _ => v.FamilyId == "prop",
+                };
+                if (!role) roleProblems++;
+                if (TreeForms.Contains(v.Form)) ctx.True(v.Sways, $"{label}: the {v.Form} sways in the wind");
+                ctx.True(v.Footprint >= EnvironmentArt.MinFootprint && v.Footprint <= Math.Max(EnvironmentArt.MinFootprint, anatomy.Metrics.HorizontalRadius) + 1e-9,
+                    $"{label}: {v.Form} footprint {v.Footprint:0.0} must be part of its horizontal reach {anatomy.Metrics.HorizontalRadius:0.0}");
+                ctx.True(p.Facing >= 0 && p.Facing < 8 && p.Phase >= 0, $"{label}: facing and wind phase");
+                // the base ellipse (rx = footprint, ry = footprint * sin(elevation)) is solid; nobody can stand on the spot
+                var e = map.FootprintExtents(p);
+                ctx.Near(e.X, v.Footprint, 1e-4, "footprint width");
+                ctx.Near(e.Y, v.Footprint * sinE, 1e-4, "footprint depth is foreshortened");
+                int rx = (int)e.X, ry = (int)e.Y;
+                foreach (var (x, y) in new[] { (p.X, p.Y), (p.X - rx, p.Y), (p.X + rx, p.Y), (p.X, p.Y - ry), (p.X, p.Y + ry) })
+                    if (map.InBounds(x, y) && map.Clearance[y * map.Width + x] != 0) blockedProblems++;
+                ctx.True(!map.CanOccupy(new Vector2(p.X, p.Y), false, false, 1), $"{label}: a creature cannot stand inside the {v.Form} at {p.X},{p.Y}");
+            }
+            ctx.Equal(map.Props.Count, placed, $"{label}: every prop spot shows procedural scenery");
+            ctx.Equal(0, roleProblems, $"{label}: tree spots show trees, undergrowth spots plants, rock spots objects");
+            ctx.Equal(0, blockedProblems, $"{label}: scenery footprints are blocked in the clearance map");
+            ctx.True(forms.Count >= 5, $"{label}: only {forms.Count} scenery forms ({string.Join(", ", forms)})");
+            ctx.Metric($"sceneryVariants_{map.Width}x{map.Height}", map.Scenery.Count);
+            ctx.Metric($"sceneryForms_{map.Width}x{map.Height}", forms.Count);
+            ctx.Metric($"sceneryStillVariants_{map.Width}x{map.Height}", map.Scenery.Count(v => !v.Sways));
         }
 
         /// <summary>
@@ -449,6 +513,8 @@ namespace PixelCreatures.Tests
                 ctx.Metric("culledMoved", moved);
                 ctx.True(still > 0 && rendered == 0, $"rasterized outside the view: {rendered} of {still}");
                 ctx.True(moved > 0, "creatures outside the view must keep moving");
+
+                await CheckSceneryCulling(ctx, area);
 
                 // camera: centre on a far corner, the view follows the request (clamped to the map)
                 area.LookAt(new Vector2(area.Map.Width - 10, area.Map.Height - 10));
@@ -526,6 +592,92 @@ namespace PixelCreatures.Tests
                 area.QueueFree();
                 await Frames(3);
             }
+        }
+
+        /// <summary>
+        /// Scenery actors of the test area (the largest map, next to 100 creatures): one per prop spot, stationary, at the
+        /// creatures' pixel density and a low animation rate. Outside the view they are culled - not rasterized, not drawn -
+        /// and far outside they sleep; when the camera comes, they wake up and show. Visible trees sway in the wind.
+        /// </summary>
+        private async Task CheckSceneryCulling(TestContext ctx, TestArea area)
+        {
+            int frames = 0;
+            while (area.SceneryPending > 0 && frames++ < 900) await NextFrame();
+            ctx.Metric("framesUntilScenery", frames);
+            ctx.Equal(area.Map.Props.Count, area.SceneryCount, "a scenery actor for every prop spot");
+            var scenery = area.SceneryActors().ToList();
+            float density = area.Player!.PixelDensity;
+            ctx.True(Math.Abs(density - area.PixelDensity) < 1e-6, "creatures use the test area's pixel density");
+            ctx.True(scenery.All(s => s.Model!.Anatomy.Rig.Stationary && s.CullOffscreen && s.AnimationFps >= 6 && s.AnimationFps <= 8 && Math.Abs(s.PixelDensity - density) < 1e-6),
+                "scenery: stationary creations, culled offscreen, 6-8 poses/s, the creatures' pixel density");
+            ctx.True(!area.AllActors().Any(a => scenery.Contains(a)), "scenery is not part of the population");
+
+            // a tree spot, then the prop spot furthest from it (sleeping scenery wakes up): the camera stands still
+            // at each, so the culling state is exact
+            var map = area.Map;
+            var tree = map.Props.First(p => p.Kind == PropKind.Tree && p.X > 300 && p.Y > 200);
+            var far = map.Props.OrderByDescending(p => new Vector2(p.X - tree.X, p.Y - tree.Y).LengthSquared()).First();
+            foreach (var target in new[] { map.Project(new Vector2(tree.X, tree.Y)), map.Project(new Vector2(far.X, far.Y)) })
+            {
+                area.LookAt(target);
+                await Frames(4);
+                int visible = area.VisibleSceneryCount, awake = area.AwakeSceneryCount;
+                ctx.Metric($"sceneryVisibleAt{(int)target.X}", visible);
+                ctx.Metric($"sceneryAwakeAt{(int)target.X}", awake);
+                ctx.True(visible > 0 && visible < scenery.Count / 4, $"visible scenery {visible} of {scenery.Count}: culling is not working");
+                ctx.True(awake >= visible && awake < scenery.Count / 2, $"awake scenery {awake} of {scenery.Count}: scenery outside the view must sleep");
+                string? problem = SceneryCullingProblem(area);
+                ctx.True(problem == null, "scenery culling: " + problem);
+            }
+
+            // for one second of game time: culled scenery is never rasterized; visible scenery that sways keeps animating at
+            // its low rate, still objects (rocks, crates) are not rasterized again while nothing about them changes
+            var culled = scenery.Where(s => s.IsCulled).ToList();
+            var swaying = scenery.Where(s => !s.IsCulled && !s.Paused).ToList();
+            var still = scenery.Where(s => !s.IsCulled && s.Paused).ToList();
+            var culledRenders = culled.Select(s => s.RenderCount).ToArray();
+            var swayingRenders = swaying.Select(s => s.RenderCount).ToArray();
+            var stillRenders = still.Select(s => s.RenderCount).ToArray();
+            var flora = swaying.Where(s => s.Genome!.FamilyId == "flora" && s.Frame != null).ToList();
+            var before = flora.Select(s => (byte[])s.Frame!.Indices.Clone()).ToList();
+            double gameTime = 0;
+            while (gameTime < 1.0)
+            {
+                await NextFrame();
+                gameTime += GetProcessDeltaTime();
+            }
+            ctx.Metric("sceneryStill", scenery.Count(s => s.Paused));
+            int rasterized = culled.Where((s, i) => s.RenderCount != culledRenders[i]).Count();
+            ctx.True(culled.Count > 0 && rasterized == 0, $"scenery rasterized outside the view: {rasterized} of {culled.Count}");
+            ctx.True(culled.All(s => s.IsCulled), "the camera did not move: culled scenery stays culled");
+            int stillRasterized = still.Where((s, i) => s.RenderCount != stillRenders[i]).Count();
+            ctx.True(stillRasterized == 0, $"still scenery rasterized again: {stillRasterized} of {still.Count}");
+            double perSecond = swaying.Select((s, i) => (s.RenderCount - swayingRenders[i]) / gameTime).DefaultIfEmpty(0).Average();
+            ctx.Metric("sceneryPosesPerSecond", Math.Round(perSecond, 1));
+            ctx.True(perSecond >= TestArea.SceneryAnimationFps * 0.5 && perSecond <= TestArea.SceneryAnimationFps * 1.6, $"visible scenery renders {perSecond:0.0} poses/s (expected about {TestArea.SceneryAnimationFps})");
+            int changed = flora.Where((s, i) => !s.Frame!.Indices.AsSpan().SequenceEqual(before[i])).Count();
+            ctx.Metric("swayingFlora", changed);
+            ctx.True(flora.Count > 0 && changed > 0, $"visible trees and plants sway in the wind: {changed} of {flora.Count} changed");
+        }
+
+        private static string Form(CreatureActor a) => a.Genome?.GetChoice("form") ?? "?";
+
+        /// <summary>Checks every scenery actor against the view: outside (plus its cull margin) culled, inside shown, asleep only when culled.</summary>
+        private static string? SceneryCullingProblem(TestArea area)
+        {
+            var view = area.ViewRect;
+            foreach (var s in area.SceneryActors())
+            {
+                var c = s.RenderCanvas;
+                if (c == null) return $"{s.Genome?.Name}: no canvas";
+                float k = (float)s.DisplayScale;
+                var canvas = new Rect2(s.Position + new Vector2(-c.OriginX, -c.OriginY) * k, new Vector2(c.Width, c.Height) * k);
+                // a pixel of slack for snapped camera positions
+                if (!canvas.Grow(1).Intersects(view.Grow(s.CullMargin)) && !s.IsCulled) return $"{Form(s)} at {s.Position} is outside the view {view} but not culled";
+                if (canvas.Grow(-1).Intersects(view.Grow(-1)) && s.IsCulled) return $"{Form(s)} at {s.Position} is in the view {view} but culled";
+                if (s.ProcessMode == ProcessModeEnum.Disabled && !s.IsCulled) return $"{Form(s)} at {s.Position} sleeps but is not culled";
+            }
+            return null;
         }
 
         /// <summary>

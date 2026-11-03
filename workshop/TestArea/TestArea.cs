@@ -3,12 +3,19 @@
 // of every family wandering around. Creatures outside the view keep moving but are not rasterized
 // (CreatureActor.CullOffscreen), so large maps with many creatures stay cheap.
 //
+// Scenery: by default the trees, bushes and rocks are flora and prop creations (stationary actors that
+// sway in the wind at a low animation rate, same pixel density as the creatures); the classic style shows
+// static textures instead. Scenery actors are culled like creatures, and outside the view (plus a margin)
+// they also stop simulating, because nothing about them changes while nobody watches - hundreds of trees
+// on the large maps then cost next to nothing.
+//
 // Controls: WASD / arrows move, Shift runs, Space = action, R = rest, H = get hit, Tab = nearest creature,
 // left click on a creature = take control, mouse wheel = zoom, right/middle drag = move the camera,
-// F = camera follows again, M = minimap, PageUp/PageDown = map size, N = new map, +/- = population,
-// F1 = overlay, Esc = back to the workshop.
+// F = camera follows again, M = minimap, PageUp/PageDown = map size, N = new map, P = procedural or
+// classic scenery, +/- = population, F1 = overlay, Esc = back to the workshop.
 //
 // Command line (after "--"): --testarea [--population=1..100] [--map=0..4] [--map-seed=N] [--zoom=1..8]
+//                            [--scenery=procedural|classic] [--density=1..4]
 
 using System;
 using System.Collections.Generic;
@@ -29,8 +36,15 @@ namespace PixelCreatures.Workshop
     {
         public const int MaxCreatures = 100;
         public const int DefaultMapIndex = 1;
-        /// <summary>Main thread time per frame for spawning creatures; larger populations appear over a few frames.</summary>
+        /// <summary>Main thread time per frame for spawning scenery and creatures; large maps fill up over a few frames.</summary>
         private const double SpawnBudgetMs = 4.0;
+        /// <summary>Pose snapshots per second of the scenery: wind sway is slow, so a few frames per second are plenty.</summary>
+        public const int SceneryAnimationFps = 6;
+        /// <summary>
+        /// Scenery further than this outside the view (map pixels) stops simulating. Larger than the actors'
+        /// CullMargin, so an actor has always culled itself before it is put to sleep and wakes before it shows.
+        /// </summary>
+        public const float SceneryWakeMargin = 48;
 
         private SubViewport _viewport = null!;
         private TextureRect _display = null!;
@@ -72,6 +86,22 @@ namespace PixelCreatures.Workshop
         private readonly Stopwatch _frameWatch = new Stopwatch();
         private readonly List<double> _frameTimes = new List<double>();
         private int _nextNpc;
+        private PackedScene? _actorScene;
+        private SceneryStyle _sceneryStyle = SceneryStyle.Procedural;
+        private float _density = (float)CreatureRuntime.DefaultDensity;
+        private readonly List<SceneryActor> _scenery = new List<SceneryActor>();
+        /// <summary>Prop spots whose scenery actor is still to be created, nearest to the camera first.</summary>
+        private readonly List<int> _sceneryQueue = new List<int>();
+        private bool _sceneryQueueSorted;
+        private Button _sceneryButton = null!;
+
+        private sealed class SceneryActor
+        {
+            public CreatureActor Actor = null!;
+            /// <summary>Canvas of the actor on the map (map pixels), for waking it before it comes into view.</summary>
+            public Rect2 Bounds;
+            public bool Awake = true;
+        }
 
         private sealed class Wanderer
         {
@@ -117,6 +147,19 @@ namespace PixelCreatures.Workshop
         }
 
         public CreatureActor? Player => _player;
+
+        /// <summary>Procedural scenery (flora and prop actors) or classic static textures.</summary>
+        public SceneryStyle SceneryStyle => _sceneryStyle;
+        /// <summary>Pixel density of every actor in the test area: creatures and scenery match.</summary>
+        public float PixelDensity => _density;
+        /// <summary>The flora and prop actors of the current map (creatures are not included).</summary>
+        public IEnumerable<CreatureActor> SceneryActors() => _scenery.Select(s => s.Actor);
+        public int SceneryCount => _scenery.Count;
+        /// <summary>Scenery actors that are still to be created for the current map.</summary>
+        public int SceneryPending => _sceneryQueue.Count;
+        public int VisibleSceneryCount => _scenery.Count(s => !s.Actor.IsCulled);
+        /// <summary>Scenery actors that currently simulate (in or near the view).</summary>
+        public int AwakeSceneryCount => _scenery.Count(s => s.Awake);
 
         // ------------------------------------------------------------------ setup
 
@@ -170,12 +213,14 @@ namespace PixelCreatures.Workshop
                 else if (a.StartsWith("--map=") && int.TryParse(a.Substring(6), out int m)) _mapIndex = Math.Clamp(m, 0, MapSize.All.Length - 1);
                 else if (a.StartsWith("--map-seed=") && ulong.TryParse(a.Substring(11), out ulong s)) _mapSeed = s;
                 else if (a.StartsWith("--zoom=") && int.TryParse(a.Substring(7), out int z)) _zoom = Math.Clamp(z, 1, 8);
+                else if (a.StartsWith("--scenery=")) _sceneryStyle = a.Substring(10) == "classic" ? SceneryStyle.Classic : SceneryStyle.Procedural;
+                else if (a.StartsWith("--density=") && float.TryParse(a.Substring(10), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float d)) _density = Math.Clamp(d, 1, 4);
             }
             BuildOverlay();
             _minimap = new TestAreaMinimap { Area = this };
             AddChild(_minimap);
             var size = MapSize.All[_mapIndex];
-            ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, _mapSeed));
+            ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, _mapSeed, default, _sceneryStyle));
 
             SpawnPlayer(TestAreaLauncher.PendingGenome ?? CreatureRuntime.Sample("quadruped", 7));
             SetPopulation(population);
@@ -228,11 +273,15 @@ namespace PixelCreatures.Workshop
             _mapValue = UiKit.Label("", 13);
             _mapValue.CustomMinimumSize = new Vector2(150, 0);
             _mapValue.HorizontalAlignment = HorizontalAlignment.Center;
+            _sceneryButton = UiKit.Toggle("Procedural scenery", _sceneryStyle == SceneryStyle.Procedural,
+                on => SetSceneryStyle(on ? SceneryStyle.Procedural : SceneryStyle.Classic),
+                "Trees, bushes and rocks as flora and prop creations that sway in the wind, or as classic static sprites (P)");
             v.AddChild(UiKit.Row(6, Caption("Map"),
                 UiKit.Button("−", () => SetMapSize(_mapIndex - 1), "Smaller map (PgDn)"),
                 _mapValue,
                 UiKit.Button("+", () => SetMapSize(_mapIndex + 1), "Larger map (PgUp)"),
-                UiKit.Button("New map", NewMap, "New map of the same size (N)")));
+                UiKit.Button("New map", NewMap, "New map of the same size (N)"),
+                _sceneryButton));
 
             _zoomValue = UiKit.Label("", 13);
             _zoomValue.CustomMinimumSize = new Vector2(26, 0);
@@ -295,6 +344,18 @@ namespace PixelCreatures.Workshop
             RequestMap(immediate);
         }
 
+        /// <summary>
+        /// Switches between procedural scenery (flora and prop actors) and classic static props. The layout stays
+        /// the same; the map is regenerated because the footprints of the props change.
+        /// </summary>
+        public void SetSceneryStyle(SceneryStyle style, bool immediate = false)
+        {
+            if (style == _sceneryStyle && _mapTask == null) return;
+            _sceneryStyle = style;
+            _sceneryButton?.SetPressedNoSignal(style == SceneryStyle.Procedural);
+            RequestMap(immediate);
+        }
+
         private void RequestMap(bool immediate)
         {
             _mapCancel?.Cancel();
@@ -302,14 +363,15 @@ namespace PixelCreatures.Workshop
             _mapTask = null;
             var size = MapSize.All[_mapIndex];
             ulong seed = _mapSeed;
+            var style = _sceneryStyle;
             if (immediate)
             {
-                ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, seed));
+                ApplyMap(EnvironmentArt.GenerateMap(size.Width, size.Height, seed, default, style));
                 return;
             }
             var cancel = new CancellationTokenSource();
             _mapCancel = cancel;
-            _mapTask = Task.Run(() => EnvironmentArt.GenerateMap(size.Width, size.Height, seed, cancel.Token), cancel.Token);
+            _mapTask = Task.Run(() => EnvironmentArt.GenerateMap(size.Width, size.Height, seed, cancel.Token, style), cancel.Token);
             UpdateMapUi();
         }
 
@@ -347,17 +409,25 @@ namespace PixelCreatures.Workshop
                 _ponds.Add((sprite, frames));
             }
             _waterFrame = -1;
-            // props: a handful of variants per kind share their textures
-            var rng = new Rng(map.Seed ^ 0x56415249UL);
-            var trees = PropVariants(PropKind.Tree, EnvironmentArt.TreeVariants, rng);
-            var bushes = PropVariants(PropKind.Bush, EnvironmentArt.BushVariants, rng);
-            var rocks = PropVariants(PropKind.Rock, EnvironmentArt.RockVariants, rng);
-            foreach (var p in map.Props)
+            // procedural scenery: actors are created over the next frames, nearest to the camera first
+            for (int i = 0; i < map.Props.Count; i++)
+                if (map.SceneryOf(map.Props[i]) != null) _sceneryQueue.Add(i);
+            _sceneryQueueSorted = false;
+            // static props (classic style, or spots without scenery): a handful of variants per kind share their textures
+            if (_sceneryQueue.Count < map.Props.Count)
             {
-                var v = p.Kind == PropKind.Tree ? trees[p.Variant] : (p.Kind == PropKind.Bush ? bushes[p.Variant] : rocks[p.Variant]);
-                var s = new Sprite2D { Texture = v.Texture, Centered = false, Offset = -new Vector2(v.Origin.X, v.Origin.Y), Position = map.Project(new Vector2(p.X, p.Y)) };
-                _entities.AddChild(s);
-                _propSprites.Add(s);
+                var rng = new Rng(map.Seed ^ 0x56415249UL);
+                var trees = PropVariants(PropKind.Tree, EnvironmentArt.TreeVariants, rng);
+                var bushes = PropVariants(PropKind.Bush, EnvironmentArt.BushVariants, rng);
+                var rocks = PropVariants(PropKind.Rock, EnvironmentArt.RockVariants, rng);
+                foreach (var p in map.Props)
+                {
+                    if (map.SceneryOf(p) != null) continue;
+                    var v = p.Kind == PropKind.Tree ? trees[p.Variant] : (p.Kind == PropKind.Bush ? bushes[p.Variant] : rocks[p.Variant]);
+                    var s = new Sprite2D { Texture = v.Texture, Centered = false, Offset = -new Vector2(v.Origin.X, v.Origin.Y), Position = map.Project(new Vector2(p.X, p.Y)) };
+                    _entities.AddChild(s);
+                    _propSprites.Add(s);
+                }
             }
             _camera.LimitRight = map.Width;
             _camera.LimitBottom = map.Height;
@@ -400,6 +470,9 @@ namespace PixelCreatures.Workshop
         {
             foreach (var s in _propSprites) if (IsInstanceValid(s)) s.QueueFree();
             _propSprites.Clear();
+            foreach (var s in _scenery) if (IsInstanceValid(s.Actor)) s.Actor.QueueFree();
+            _scenery.Clear();
+            _sceneryQueue.Clear();
             foreach (var (sprite, _) in _ponds) if (IsInstanceValid(sprite)) sprite.QueueFree();
             _ponds.Clear();
             if (IsInstanceValid(_ground)) _ground.Texture = null;
@@ -472,11 +545,105 @@ namespace PixelCreatures.Workshop
 
         private CreatureActor NewActor(int fps)
         {
-            var actor = GD.Load<PackedScene>("res://addons/procedural_creatures/Runtime/CreatureActor.tscn").Instantiate<CreatureActor>();
+            // loaded once per test area: hundreds of scenery actors would otherwise each go through the resource loader
+            _actorScene ??= GD.Load<PackedScene>("res://addons/procedural_creatures/Runtime/CreatureActor.tscn");
+            var actor = _actorScene.Instantiate<CreatureActor>();
             actor.FamilyId = string.Empty;
             actor.AnimationFps = fps;
             actor.CullOffscreen = true;
+            actor.PixelDensity = _density;
             return actor;
+        }
+
+        // ------------------------------------------------------------------ scenery
+
+        /// <summary>
+        /// Creates queued scenery actors nearest to the camera first: everything in view at once (no pop-in after a map
+        /// change), the rest until the frame's spawn budget is used up (at least one per frame).
+        /// </summary>
+        private void SpawnScenery(long deadline)
+        {
+            if (_sceneryQueue.Count == 0) return;
+            // after a map switch the camera itself only moves in UpdateCamera: aim at where it is going to be
+            var focus = ClampCamera(_follow && _player != null
+                ? _map.Project(GodotConvert.GroundToScreen(_player.GroundPosition.X, _player.GroundPosition.Y)) - new Vector2(0, 12)
+                : _cameraPos);
+            if (!_sceneryQueueSorted)
+            {
+                var props = _map.Props;
+                _sceneryQueue.Sort((a, b) => DistanceSq(props[b], focus).CompareTo(DistanceSq(props[a], focus)));
+                _sceneryQueueSorted = true;
+            }
+            var size = (Vector2)_viewport.Size;
+            var view = new Rect2(focus - size / 2, size).Grow(SceneryWakeMargin);
+            do
+            {
+                int i = _sceneryQueue[_sceneryQueue.Count - 1];
+                _sceneryQueue.RemoveAt(_sceneryQueue.Count - 1);
+                SpawnSceneryActor(_map.Props[i]);
+            }
+            while (_sceneryQueue.Count > 0 && (Stopwatch.GetTimestamp() < deadline || view.Intersects(SpotBounds(_map.Props[_sceneryQueue[_sceneryQueue.Count - 1]]))));
+        }
+
+        private float DistanceSq(in PropSpot p, Vector2 c) => _map.Project(new Vector2(p.X, p.Y)).DistanceSquaredTo(c);
+
+        /// <summary>Canvas of a spot's scenery on the map before its actor exists (canvas of the model in world units).</summary>
+        private Rect2 SpotBounds(in PropSpot p)
+        {
+            var c = _map.SceneryOf(p)!.Model.Anatomy.Canvas;
+            return new Rect2(_map.Project(new Vector2(p.X, p.Y)) - new Vector2(c.OriginX, c.OriginY), new Vector2(c.Width, c.Height));
+        }
+
+        private void SpawnSceneryActor(in PropSpot spot)
+        {
+            var variant = _map.SceneryOf(spot)!;
+            var at = new Vector2(spot.X, spot.Y);
+            var ground = GodotConvert.ScreenToGround(at);
+            float lift = _map.HeightAt(at);
+            double yaw = PixelCamera.DirectionYaw(spot.Facing);
+            var actor = NewActor(SceneryAnimationFps);
+            // the same projection as creatures and the static props: y-sorted against cliffs and creatures by its base
+            actor.SurfaceHeight = _ => lift;
+            actor.FaceYaw(yaw);
+            actor.GroundPosition = ground;
+            actor.Position = _map.Project(at).Round();
+            _entities.AddChild(actor);
+            actor.ApplyModel(variant.Model);
+            // start in the spot's own facing and wind phase: spots sharing a variant do not sway in step
+            var motor = actor.Motor!;
+            motor.Context.Time = spot.Phase;
+            motor.Teleport(new Vec3(ground.X, 0, ground.Y), yaw);
+            // rocks, crates and the like hold still: rasterized when they come into view, not at every animation tick
+            actor.Paused = !variant.Sways;
+            _scenery.Add(new SceneryActor { Actor = actor, Bounds = CanvasBounds(actor) });
+        }
+
+        /// <summary>Canvas of an actor in map pixels (the sprite is drawn at 1/density).</summary>
+        private static Rect2 CanvasBounds(CreatureActor actor)
+        {
+            var c = actor.RenderCanvas;
+            if (c == null) return new Rect2(actor.Position, Vector2.Zero);
+            float k = (float)actor.DisplayScale;
+            return new Rect2(actor.Position + new Vector2(-c.OriginX, -c.OriginY) * k, new Vector2(c.Width, c.Height) * k);
+        }
+
+        /// <summary>
+        /// Scenery near the view simulates (wind sway) and culls itself through CullOffscreen; scenery far outside stops
+        /// processing altogether. An actor is only put to sleep once it has culled itself, so a sleeping actor is
+        /// always hidden, and it wakes up a margin before it reaches the view.
+        /// </summary>
+        private void UpdateSceneryWake()
+        {
+            if (_scenery.Count == 0) return;
+            var near = ViewRect.Grow(SceneryWakeMargin);
+            foreach (var s in _scenery)
+            {
+                bool wake = near.Intersects(s.Bounds);
+                if (wake == s.Awake || (!wake && !s.Actor.IsCulled)) continue;
+                s.Awake = wake;
+                if (!wake) s.Bounds = CanvasBounds(s.Actor);
+                s.Actor.ProcessMode = wake ? ProcessModeEnum.Inherit : ProcessModeEnum.Disabled;
+            }
         }
 
         private void SpawnPlayer(CreatureGenome genome)
@@ -497,7 +664,7 @@ namespace PixelCreatures.Workshop
             UpdatePopulationUi();
         }
 
-        private void UpdatePopulation()
+        private void UpdatePopulation(long deadline)
         {
             int target = _targetPopulation - (_player != null ? 1 : 0);
             while (_npcs.Count > target)
@@ -507,10 +674,8 @@ namespace PixelCreatures.Workshop
                 w.Actor.QueueFree();
             }
             if (_npcs.Count >= target) return;
-            long start = Stopwatch.GetTimestamp();
-            long budget = (long)(Stopwatch.Frequency * SpawnBudgetMs / 1000.0);
             do SpawnWanderer();
-            while (_npcs.Count < target && Stopwatch.GetTimestamp() - start < budget);
+            while (_npcs.Count < target && Stopwatch.GetTimestamp() < deadline);
         }
 
         private void SpawnWanderer()
@@ -691,6 +856,7 @@ namespace PixelCreatures.Workshop
                 case Key.F: SetFollow(true); break;
                 case Key.M: ShowMinimap(!_minimap.Visible); break;
                 case Key.N: NewMap(); break;
+                case Key.P: SetSceneryStyle(_sceneryStyle == SceneryStyle.Procedural ? SceneryStyle.Classic : SceneryStyle.Procedural); break;
                 case Key.G: RerollPopulation(); break;
                 case Key.Pageup: SetMapSize(_mapIndex + 1); break;
                 case Key.Pagedown: SetMapSize(_mapIndex - 1); break;
@@ -717,10 +883,14 @@ namespace PixelCreatures.Workshop
             if (_frameTimes.Count > 240) _frameTimes.RemoveAt(0);
             _frameWatch.Restart();
             PollMapTask();
-            UpdatePopulation();
+            // scenery and creatures share one spawn budget per frame (each gets at least one spawn)
+            long deadline = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * SpawnBudgetMs / 1000.0);
+            SpawnScenery(deadline);
+            UpdatePopulation(deadline);
             UpdatePlayer();
             foreach (var w in _npcs) UpdateWanderer(w, delta);
             UpdateCamera();
+            UpdateSceneryWake();
             _time += delta;
             int wf = (int)(_time * 3) % 4;
             if (wf != _waterFrame)
@@ -895,9 +1065,10 @@ namespace PixelCreatures.Workshop
             _hudTimer = 0.25;
             string pname = _player?.Genome?.Name ?? "-";
             int visible = VisibleCreatureCount;
+            string scenery = _scenery.Count > 0 ? $"   Scenery: {_scenery.Count}, {VisibleSceneryCount} visible, {AwakeSceneryCount} awake" : string.Empty;
             _hud.Text = "WASD/arrow keys walk, Shift run, Space action, R rest, H hit, Tab/left click take control of a creature\n" +
-                        "Mouse wheel zoom, right-drag camera, F follow, M minimap, PgUp/PgDn map size, N new map, G reroll, F1 overlay\n" +
-                        $"Player: {pname} ({_player?.State})   Creatures: {CreatureCount}, {visible} visible";
+                        "Mouse wheel zoom, right-drag camera, F follow, M minimap, PgUp/PgDn map size, N new map, P scenery, G reroll, F1 overlay\n" +
+                        $"Player: {pname} ({_player?.State})   Creatures: {CreatureCount}, {visible} visible{scenery}";
             if (_frameTimes.Count > 10)
             {
                 var sorted = _frameTimes.OrderBy(x => x).ToList();
@@ -906,6 +1077,7 @@ namespace PixelCreatures.Workshop
             }
             string status = string.Empty;
             if (_mapTask != null) status = $"Generating map {MapSize.All[_mapIndex]}…";
+            else if (_sceneryQueue.Count > 0) status = $"Scenery growing… {_scenery.Count}/{_scenery.Count + _sceneryQueue.Count}";
             else if (CreatureCount < _targetPopulation) status = $"Creatures appearing… {CreatureCount}/{_targetPopulation}";
             else if (_mapIndex < MapSize.All.Length - 1 && _map.Width * (double)_map.Height / CreatureCount < 9000)
                 status = "Tip: it's getting crowded. Use “+” next to Map or PgUp for a larger map.";
