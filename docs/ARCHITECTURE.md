@@ -47,6 +47,11 @@ locomotion modules. Classes marked `[CreatureExtension]` implement `ICreatureExt
 a parameterless constructor. The shared registry discovers them in loaded assemblies; the console
 harness explicitly calls `DiscoverExtensions` for its assembly.
 
+Families declare a `CreationCategory` (creature, mythical, monster, flora, prop) that user interfaces use
+for grouping, and may implement `ISurfaceCustomizer` to give material slots their own surface styles
+(the flora family gives its canopy the foliage style while the trunk keeps bark; props use wood, masonry
+or crystal per part). Customized surfaces are cached per family.
+
 The `addons/procedural_creatures_plantfolk/` add-on is a complete example using the public core API.
 Use stable family and gene IDs when extending an existing project, and update generator versions
 or migrations when changes would affect saved genomes. The Godot integration example is
@@ -108,6 +113,11 @@ A body plan (`ICreatureFamily.BuildAnatomy`) uses the `AnatomyBuilder` to assemb
 - **Metrics and canvas:** body length, leg length, speeds; the canvas is computed from the
   horizontal extent in all facing directions plus a motion margin.
 
+**Solids** (`Core/Shapes/Solids.cs`) build hard-edged boxes, prisms, frustums, pyramids and half-cylinder
+vaults from triangle plates for props. Each face carries explicit surface coordinates
+(`PrimFlags.UvMapped`), so wood planks, masonry courses and metal bands line up across the triangles of a
+face, and faces are wound outwards so the plate shading treats them as the front.
+
 Shape blocks (`IShapeBlock`) encapsulate reusable parts: legs (IK in the rest pose), tails
 and chains, heads with snout/jaw/eyes and nose shape (animal nose, bulbous, hooked or flat
 nose), ears, horns, wings (membrane, feathers, insect – with a designed folded pose), fins,
@@ -147,6 +157,22 @@ canvas per creature):
 The result is a `PixelFrame` of palette indices; the palette (including hit flash) is only applied
 when converting to RGBA. After warm-up, the renderer does not allocate.
 
+### Pixel density and HD detail
+
+`ViewSpec.Density` sets the output pixels per world unit (2 = HD, the runtime default; 1 = classic).
+The renderer folds the density into the creature-to-view transform, so geometry, blend radii, depth
+thresholds, contact-shadow rays, features and pattern coordinates scale together, while outlines and
+plate thickness stay one pixel. Motion, metrics and `CanvasSpec` stay in world units; frames are sized
+with `CanvasSpec.Scaled(density)`. Micro textures grow slower than the density (more, finer strands,
+scales and leaves), and fur, feather, bark and foliage silhouettes are broken up by body-anchored tufts.
+
+Level of detail by density: a primitive or feature with `MinDensity` is only drawn at that density or
+above, one with `MaxDensity` only below it, so shape blocks can add HD-only anatomy or swap a classic
+shape for an HD one. The shared blocks add an HD layer this way — limb muscles, joint knobs, toes and
+claws, hooves, fingers, facial structure, flat ears, chitin joints and bristles — and families add torso
+musculature, scutes and ribs. Detail primitives never enlarge the canvas, and classic density output is
+bit-identical to the output without them (the golden values pin both).
+
 ## Animation
 
 `CreatureMotor` simulates one instance with a fixed time step. Each step:
@@ -180,9 +206,19 @@ Locomotion modules (swappable via the registry):
 | `hop` | slimes | crouch → jump → landing with squash & stretch, wobbling |
 | `float` | jellyfish, wisps, floating eyes | pulsing, trailing tentacles, hovering |
 | `rootwalk` (extension) | Plantfolk | waddling root gait with plant sway |
+| `rooted` | trees, flora, props | stationary: gusty trunk lean and travelling sway waves on branch, frond, curtain, banner, lantern and flame chains (`wind.trunk`, `wind.branch`, `wind.hz` tuning); loops exactly in export mode |
+
+Rigs flagged `Stationary` never move on their own; they still turn to a facing direction, act and react
+to hits (they pivot about their base instead of sliding). Their action is `Shake` (a rustle that lashes
+the chains and opens jaws such as chest lids) and their rest is `Dormant` (calmer wind, closed lids).
 
 ## Godot runtime
 
+- **Pixel density:** `CreatureActor.PixelDensity` (default `CreatureRuntime.DefaultDensity`, 2) sets the
+  sprite resolution. With `ScaleToWorld` (default) the sprite is drawn at 1/density, so the actor keeps its
+  world size and moves in world units; pixel stages in the workshop disable it and show one texel per
+  stage pixel instead, halving their automatic zoom. The 100-creature overview grid and gallery
+  thumbnails use classic density for throughput.
 - **`CreatureActor`** (Node2D, scene `Runtime/CreatureActor.tscn`): loads a preset or family + seed,
   builds asynchronously, simulates with a fixed time step, renders at the animation rate (`AnimationFps`,
   default 15 poses/s – typical for pixel art) and uploads the texture. Controlled via
@@ -238,7 +274,8 @@ game can move the sprite without foot sliding.
 Presets use the versioned `ppc.creature` JSON format and retain the family, generator version, genes,
 four random-stream seeds and lineage. `GenomeSerializer` validates input and applies registered
 migrations. Sprite-sheet metadata uses `ppc.spritesheet` and records page sizes, frame rectangles,
-pivots, timing, facing directions and root motion. Both formats have version 1; the current
+pivots, timing, facing directions and root motion. `SpritesheetOptions.Density` exports HD frames;
+the metadata records `pixelDensity`, and root motion is given in sprite pixels. Both formats have version 1; the current
 generator version is 2. The concrete serializers live in `Core/Serialization/` and `Core/Export/`.
 
 ## Terrain and habitats

@@ -75,7 +75,6 @@ namespace PixelCreatures.Harness
             }
             // render every cell first to size the grid
             var cells = new List<List<(byte[] rgba, int w, int h, int ox, int oy, string name)>>();
-            int cellW = 0, cellH = 0;
             foreach (var (_, models) in rows)
             {
                 var row = new List<(byte[], int, int, int, int, string)>();
@@ -87,9 +86,11 @@ namespace PixelCreatures.Harness
                 }
                 cells.Add(row);
             }
-            // content bounds relative to origin
-            int left = 0, right = 0, up = 0, down = 0;
+            // content bounds relative to the origin, per row (small props are not lost next to giants)
+            var rowDims = new List<(int left, int right, int up, int down)>();
             foreach (var row in cells)
+            {
+                int left = 0, right = 0, up = 0, down = 0;
                 foreach (var (rgba, w, h, ox, oy, _) in row)
                 {
                     Bounds(rgba, w, h, out int x0, out int y0, out int x1, out int y1);
@@ -97,18 +98,24 @@ namespace PixelCreatures.Harness
                     left = Math.Max(left, ox - x0); right = Math.Max(right, x1 - ox);
                     up = Math.Max(up, oy - y0); down = Math.Max(down, y1 - oy);
                 }
-            cellW = (left + right + 6) * scale;
-            cellH = (up + down + 6) * scale + 10;
-            int cols = rows.Max(r => r.models.Count);
+                rowDims.Add((left, right, up, down));
+            }
             int labelH = 12;
-            int width = cols * cellW + 8;
-            int height = rows.Count * (cellH + labelH) + 8;
+            int width = 8, height = 8;
+            for (int r = 0; r < rows.Count; r++)
+            {
+                var (l, rr, u, d) = rowDims[r];
+                width = Math.Max(width, cells[r].Count * (l + rr + 6) * scale + 8);
+                height += (u + d + 6) * scale + 10 + labelH;
+            }
             var canvas = new ImageCanvas(width, height, new Rgba(38, 44, 52, 255));
             var bg = new Rgba(58, 72, 64, 255);
             var bg2 = new Rgba(62, 77, 68, 255);
+            int y = 4;
             for (int r = 0; r < rows.Count; r++)
             {
-                int y = 4 + r * (cellH + labelH);
+                var (left, right, up, down) = rowDims[r];
+                int cellW = (left + right + 6) * scale, cellH = (up + down + 6) * scale + 10;
                 canvas.Text(6, y + 3, rows[r].label.ToUpperInvariant(), new Rgba(230, 230, 220, 255), 1);
                 for (int c = 0; c < cells[r].Count; c++)
                 {
@@ -120,6 +127,7 @@ namespace PixelCreatures.Harness
                     canvas.Blit(rgba, w, h, dx, dy, scale);
                     canvas.Text(x + 2, y + labelH + cellH - 10, name.ToUpperInvariant(), new Rgba(200, 210, 200, 255), 1);
                 }
+                y += cellH + labelH;
             }
             Directory.CreateDirectory(outDir);
             string file = Path.Combine(outDir, $"sheet_{(filter.Length == 0 ? "all" : filter.Replace(',', '_'))}{(byArch ? "_arch" : "")}{(walk ? "_walk" : "")}{(grid > 0 ? "_g" + grid : "")}_d{dir}_x{density}.png");
