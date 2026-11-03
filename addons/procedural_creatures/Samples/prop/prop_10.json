@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Velumall",
+  "seeds": {
+    "anatomy": "11615141035184658732",
+    "color": "15507879442027815175",
+    "pattern": "4528032557779389375",
+    "motion": "951763733939246326"
+  },
+  "genes": {
+    "form": "pillar",
+    "size": 0.747,
+    "height": 0.443,
+    "width": 0.407,
+    "count": 0.738,
+    "wear": 0.137,
+    "ornament": 0.335,
+    "light": 0.664,
+    "color.clothHue": 317,
+    "color.clothSaturation": 0.794,
+    "color.clothValue": 0.486,
+    "color.metal": "iron",
+    "color.hue": 79.5,
+    "color.saturation": 0.266,
+    "color.value": 0.691,
+    "color.scheme": "natural",
+    "color.secondaryShift": -0.262,
+    "color.bellyLight": 0.448,
+    "color.markingDark": 0.53,
+    "color.accent": "bone",
+    "color.eyeHue": 94,
+    "color.glow": 0,
+    "color.hueShift": 0.762,
+    "color.outline": 0.6,
+    "surface.material": "masonry",
+    "surface.texture": 0.64,
+    "pattern.type": "mottled",
+    "pattern.size": 0.574,
+    "pattern.density": 0.598,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

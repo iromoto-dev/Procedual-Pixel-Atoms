@@ -149,7 +149,7 @@ namespace PixelCreatures.Workshop
                     // whenever walking, turning, a wingbeat or an action expands the silhouette.
                     if (FixedFraming && ca.Model != null)
                     {
-                        var canvas = ca.Model.Anatomy.Canvas;
+                        var canvas = StageCanvas(ca);
                         target = new Vector2I(canvas.Width, canvas.Height);
                     }
                     else if (ca.ContentExtent.X > 0)
@@ -187,7 +187,7 @@ namespace PixelCreatures.Workshop
                 {
                     if (FixedFraming && ca.Model != null)
                     {
-                        var canvas = ca.Model.Anatomy.Canvas;
+                        var canvas = StageCanvas(ca);
                         target = Follow.GlobalPosition + new Vector2(canvas.Width * 0.5f - canvas.OriginX, canvas.Height * 0.5f - canvas.OriginY);
                     }
                     else if (ca.ContentExtent.X > 0) target = Follow.GlobalPosition + ca.ContentCenter;
@@ -207,6 +207,16 @@ namespace PixelCreatures.Workshop
                 if (aquatic || _managedSwimmer) swimmer.DrawShadow = !submerged;
                 _managedSwimmer = submerged;
             }
+        }
+
+        /// <summary>
+        /// The actor's animation canvas in stage units: texture pixels at its pixel density (HD actors get
+        /// half the automatic zoom and show twice the detail), or world units when its sprite is scaled.
+        /// </summary>
+        private static CanvasSpec StageCanvas(CreatureActor ca)
+        {
+            var model = ca.Model!;
+            return ca.ScaleToWorld ? model.Anatomy.Canvas : model.Anatomy.Canvas.Scaled(ca.EffectiveDensity);
         }
 
         /// <summary>Converts a position inside this control to world coordinates of the stage.</summary>

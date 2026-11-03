@@ -199,6 +199,8 @@ namespace PixelCreatures.Workshop
             actor.AnimationFps = 15;
             // Simulate travel for the gait, but keep the preview and its background in place.
             actor.SyncNodePosition = false;
+            // Pixel stages zoom by themselves: one texel per stage pixel, so HD sprites show all their detail.
+            actor.ScaleToWorld = false;
             return actor;
         }
 
@@ -219,7 +221,7 @@ namespace PixelCreatures.Workshop
             _editorTools = tools;
             bar.AddChild(tools);
             _family = new OptionButton { FocusMode = FocusModeEnum.None, TooltipText = "Body-plan family", CustomMinimumSize = new Vector2(190, 0) };
-            foreach (var f in _families) _family.AddItem(f.DisplayName);
+            foreach (var f in _families) _family.AddItem(CreatureRuntime.FamilyLabel(f));
             tools.AddChild(_family);
             tools.AddChild(UiKit.Label("Seed", 13, UiKit.TextDim));
             _seed = new LineEdit { CustomMinimumSize = new Vector2(150, 0), PlaceholderText = "Number or text", TooltipText = "Seed: a number or any text. Same seed + family = same creature." };

@@ -46,6 +46,8 @@ namespace PixelCreatures.Core.Export
         public bool DrawShadow = true;
         /// <summary>Largest allowed sheet page edge (Godot's default texture limit is 16384).</summary>
         public int MaxPageSize = 8192;
+        /// <summary>Pixel density of the frames (2 = HD sprites with high density anatomy). Root motion is reported in sprite pixels.</summary>
+        public double Density = 1;
     }
 
     public sealed class ExportedFrame
@@ -97,8 +99,9 @@ namespace PixelCreatures.Core.Export
             if (60 % opt.Fps != 0) throw new ArgumentException("Fps muss 60 teilen (6, 10, 12, 15, 20, 30, 60).");
             var result = new SpritesheetResult();
             var renderer = new CreatureRenderer();
-            const int extra = 24;
-            var baseCanvas = model.Anatomy.Canvas;
+            double density = Math.Max(1.0, opt.Density);
+            int extra = (int)Math.Round(24 * density);
+            var baseCanvas = model.Anatomy.Canvas.Scaled(density);
             int cw = baseCanvas.Width + extra * 2, ch = baseCanvas.Height + extra * 2;
             int ox = baseCanvas.OriginX + extra, oy = baseCanvas.OriginY + extra;
             int total = opt.Clips.Count * opt.Directions.Count;
@@ -193,7 +196,7 @@ namespace PixelCreatures.Core.Export
                 {
                     cancel.ThrowIfCancellationRequested();
                     var frame = new PixelFrame(cw, ch) { OriginX = ox, OriginY = oy };
-                    var view = ViewSpec.Default(motor.Yaw);
+                    var view = ViewSpec.Default(motor.Yaw, Math.Max(1.0, opt.Density));
                     view.DrawShadow = opt.DrawShadow;
                     view.Quality = opt.Quality;
                     renderer.Render(model.Anatomy, model.Palette, model.Surface, motor.Pose, view, frame);
@@ -228,7 +231,7 @@ namespace PixelCreatures.Core.Export
                     // settle springs into the periodic steady state
                     Steps(stepsPerFrame * n * 3);
                     clip.Loop = true;
-                    clip.RootSpeed = speed;
+                    clip.RootSpeed = speed * Math.Max(1.0, opt.Density);
                     Capture(n);
                     break;
                 }
@@ -340,6 +343,7 @@ namespace PixelCreatures.Core.Export
                     ["family"] = model.Genome.FamilyId,
                     ["contentId"] = model.Genome.ContentId,
                 },
+                ["pixelDensity"] = Math.Max(1.0, opt.Density),
                 ["frameWidth"] = r.FrameWidth,
                 ["frameHeight"] = r.FrameHeight,
                 ["originX"] = r.OriginX,

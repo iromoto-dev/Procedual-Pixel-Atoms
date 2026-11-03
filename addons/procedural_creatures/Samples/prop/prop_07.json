@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Rhaaraern",
+  "seeds": {
+    "anatomy": "4801235660431697225",
+    "color": "14634843617511612547",
+    "pattern": "8066364622418064586",
+    "motion": "17504535366218906934"
+  },
+  "genes": {
+    "form": "pot",
+    "size": 0.226,
+    "height": 0.555,
+    "width": 0.498,
+    "count": 0.237,
+    "wear": 0.324,
+    "ornament": 0.451,
+    "light": 0.494,
+    "color.clothHue": 263.5,
+    "color.clothSaturation": 0.679,
+    "color.clothValue": 0.385,
+    "color.metal": "steel",
+    "color.hue": 243,
+    "color.saturation": 0.536,
+    "color.value": 0.503,
+    "color.scheme": "analogous",
+    "color.secondaryShift": 0.122,
+    "color.bellyLight": 0.442,
+    "color.markingDark": 0.845,
+    "color.accent": "bone",
+    "color.eyeHue": 303.5,
+    "color.glow": 0,
+    "color.hueShift": 0.528,
+    "color.outline": 0.438,
+    "surface.material": "hide",
+    "surface.texture": 0.489,
+    "pattern.type": "bands",
+    "pattern.size": 0.437,
+    "pattern.density": 0.257,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

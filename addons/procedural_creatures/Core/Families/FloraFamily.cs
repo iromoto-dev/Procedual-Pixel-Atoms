@@ -223,7 +223,6 @@ namespace PixelCreatures.Core.Families
         {
             public AnatomyBuilder B = null!;
             public int Wood, Canopy;
-            public double Scale;
             public double Gnarl;
             public double ClumpR;
             public double Fruit;

@@ -148,7 +148,7 @@ namespace PixelCreatures.Workshop
             _filterBox = UiKit.Column(4);
             _family = new OptionButton { FocusMode = FocusModeEnum.None, TooltipText = "All families in turn, or just one family" };
             _family.AddItem("All families");
-            foreach (var f in CreatureRuntime.Registry.Families) _family.AddItem(f.DisplayName);
+            foreach (var f in CreatureRuntime.Registry.Families) _family.AddItem(CreatureRuntime.FamilyLabel(f));
             _family.ItemSelected += _ => { FillArchetypes(); };
             _archetype = new OptionButton { FocusMode = FocusModeEnum.None, TooltipText = "Only creatures of one archetype (requires a selected family)" };
             _filterBox.AddChild(_family);
@@ -675,6 +675,8 @@ namespace PixelCreatures.Workshop
                 if (!_entries.Contains(e)) continue;
                 var a = _main.CreateActor();
                 a.AnimationFps = 12;
+                // the 100-creature grid keeps classic density: the cells are sized from classic sprites
+                a.PixelDensity = 1;
                 a.CullOffscreen = true;
                 a.CullMargin = 8;
                 a.SyncNodePosition = false;

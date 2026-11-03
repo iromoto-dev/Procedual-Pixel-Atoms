@@ -138,6 +138,7 @@ namespace PixelCreatures.Workshop
             {
                 Clips = _clips.Where(kv => kv.Value.ButtonPressed).Select(kv => kv.Key).ToList(),
                 Fps = new[] { 6, 10, 12, 15, 20, 30 }[Math.Max(0, _fps.Selected)],
+                Density = CreatureRuntime.DefaultDensity,
                 DrawShadow = _shadow.ButtonPressed,
                 Directions = _dirs.Selected switch
                 {

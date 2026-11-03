@@ -515,7 +515,8 @@ namespace PixelCreatures.Workshop
 
         private void SpawnWanderer()
         {
-            var families = CreatureRuntime.Registry.Families;
+            // wanderers come from the moving categories; trees and props are scenery of the map itself
+            var families = CreatureRuntime.Registry.Families.Where(f => f.Category is CreationCategory.Creature or CreationCategory.Mythical or CreationCategory.Monster).ToList();
             int k = _nextNpc++;
             CreatureGenome g = GenomeFactory.Sample(families[k % families.Count], (ulong)(5000 + k * 7919));
             var model = CreatureRuntime.Build(g);

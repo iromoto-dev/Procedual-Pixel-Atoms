@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Ishaidouwen",
+  "seeds": {
+    "anatomy": "2849683390426683721",
+    "color": "12388041640205765799",
+    "pattern": "14301324996821865199",
+    "motion": "7580570357840422083"
+  },
+  "genes": {
+    "form": "crystal",
+    "size": 0.423,
+    "height": 0.339,
+    "width": 0.531,
+    "count": 0.268,
+    "wear": 0.096,
+    "ornament": 0.554,
+    "light": 0.577,
+    "color.clothHue": 206.5,
+    "color.clothSaturation": 0.757,
+    "color.clothValue": 0.454,
+    "color.metal": "steel",
+    "color.hue": 191.5,
+    "color.saturation": 0.497,
+    "color.value": 0.458,
+    "color.scheme": "natural",
+    "color.secondaryShift": 0.358,
+    "color.bellyLight": 0.565,
+    "color.markingDark": 0.6,
+    "color.accent": "dark",
+    "color.eyeHue": 191.5,
+    "color.glow": 0.504,
+    "color.hueShift": 0.553,
+    "color.outline": 0.621,
+    "surface.material": "crystal",
+    "surface.texture": 0.713,
+    "pattern.type": "none",
+    "pattern.size": 0.307,
+    "pattern.density": 0.67,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

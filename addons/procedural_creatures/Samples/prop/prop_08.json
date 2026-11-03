@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Thymir",
+  "seeds": {
+    "anatomy": "9217757260252166285",
+    "color": "14285071429448348793",
+    "pattern": "17993004520867556054",
+    "motion": "17598266023273641690"
+  },
+  "genes": {
+    "form": "chest",
+    "size": 0.366,
+    "height": 0.346,
+    "width": 0.434,
+    "count": 0.823,
+    "wear": 0.89,
+    "ornament": 0.604,
+    "light": 0.588,
+    "color.clothHue": 267,
+    "color.clothSaturation": 0.832,
+    "color.clothValue": 0.571,
+    "color.metal": "iron",
+    "color.hue": 77.5,
+    "color.saturation": 0.249,
+    "color.value": 0.656,
+    "color.scheme": "natural",
+    "color.secondaryShift": -0.354,
+    "color.bellyLight": 0.628,
+    "color.markingDark": 0.686,
+    "color.accent": "gold",
+    "color.eyeHue": 48,
+    "color.glow": 0,
+    "color.hueShift": 0.445,
+    "color.outline": 0.589,
+    "surface.material": "wood",
+    "surface.texture": 0.874,
+    "pattern.type": "none",
+    "pattern.size": 0.449,
+    "pattern.density": 0.629,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

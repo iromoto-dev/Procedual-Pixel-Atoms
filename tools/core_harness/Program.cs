@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using PixelCreatures.Core;
+using PixelCreatures.Core.Genetics;
+using PixelCreatures.Core.Serialization;
 
 namespace PixelCreatures.Harness
 {
@@ -41,6 +43,32 @@ namespace PixelCreatures.Harness
                     Console.WriteLine("Golden.Values:");
                     foreach (var (key, value) in PixelCreatures.Tests.CoreTests.GoldenValues(reg, new CreatureFactory(reg)))
                         Console.WriteLine($"            [\"{key}\"] = 0x{value:x16}UL,");
+                    return 0;
+                }
+                case "samples":
+                {
+                    // samples <samplesRoot> family[,family]: one sample per archetype (at least six) as ppc.creature presets
+                    var reg = Program.CreateRegistry();
+                    var ser = new GenomeSerializer(reg);
+                    foreach (string id in (args.Length > 2 ? args[2] : "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var f = reg.GetFamily(id);
+                        string dir = Path.Combine(outDir, id);
+                        Directory.CreateDirectory(dir);
+                        var picked = new System.Collections.Generic.List<CreatureGenome>();
+                        var seen = new System.Collections.Generic.HashSet<string>();
+                        for (ulong seed = 1; seed < 5000 && (seen.Count < f.Archetypes.Count || picked.Count < 6); seed++)
+                        {
+                            var g = GenomeFactory.Sample(f, seed * 7919UL);
+                            string arch = g.GetChoice("form");
+                            if (seen.Contains(arch) && (seen.Count < f.Archetypes.Count || picked.Count >= 6)) continue;
+                            seen.Add(arch);
+                            picked.Add(g);
+                        }
+                        for (int i = 0; i < picked.Count; i++)
+                            File.WriteAllText(Path.Combine(dir, $"{id}_{i + 1:00}.json"), ser.Serialize(picked[i]));
+                        Console.WriteLine($"{id}: {picked.Count} samples");
+                    }
                     return 0;
                 }
                 case "sheet":

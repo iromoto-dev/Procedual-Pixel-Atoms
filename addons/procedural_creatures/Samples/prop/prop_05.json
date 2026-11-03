@@ -1,0 +1,56 @@
+{
+  "format": "ppc.creature",
+  "formatVersion": 1,
+  "generatorVersion": 2,
+  "family": "prop",
+  "name": "Velivoll",
+  "seeds": {
+    "anatomy": "14908117356627762995",
+    "color": "3627493994652988474",
+    "pattern": "13461745381094061871",
+    "motion": "7812338792835103616"
+  },
+  "genes": {
+    "form": "rock",
+    "size": 0.274,
+    "height": 0.808,
+    "width": 0.411,
+    "count": 0.546,
+    "wear": 0.848,
+    "ornament": 0.06,
+    "light": 0.305,
+    "color.clothHue": 155,
+    "color.clothSaturation": 0.712,
+    "color.clothValue": 0.586,
+    "color.metal": "iron",
+    "color.hue": 238.5,
+    "color.saturation": 0.084,
+    "color.value": 0.357,
+    "color.scheme": "natural",
+    "color.secondaryShift": -0.03,
+    "color.bellyLight": 0.588,
+    "color.markingDark": 0.663,
+    "color.accent": "dark",
+    "color.eyeHue": 87.5,
+    "color.glow": 0,
+    "color.hueShift": 0.55,
+    "color.outline": 0.789,
+    "surface.material": "stone",
+    "surface.texture": 0.618,
+    "pattern.type": "mottled",
+    "pattern.size": 0.666,
+    "pattern.density": 0.553,
+    "pattern.dark": true
+  },
+  "lineage": {
+    "origin": "sampled",
+    "generation": 0,
+    "parents": [],
+    "mutationStrength": 0
+  },
+  "meta": {
+    "createdWith": "Procedural Pixel Creatures 1.1.0",
+    "notes": "",
+    "tags": []
+  }
+}

@@ -88,7 +88,7 @@ namespace PixelCreatures.Workshop
             _mode.ItemSelected += _ => Rebuild();
             _family = new OptionButton { FocusMode = FocusModeEnum.None };
             _family.AddItem("All families");
-            foreach (var f in CreatureRuntime.Registry.Families) _family.AddItem(f.DisplayName);
+            foreach (var f in CreatureRuntime.Registry.Families) _family.AddItem(CreatureRuntime.FamilyLabel(f));
             _family.ItemSelected += _ => Rebuild();
             controls.AddChild(_mode);
             controls.AddChild(_family);

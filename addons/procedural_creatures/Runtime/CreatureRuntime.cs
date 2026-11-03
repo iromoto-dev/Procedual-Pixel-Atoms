@@ -23,6 +23,12 @@ namespace PixelCreatures.Runtime
 
         public static CreatureRegistry Registry => CreatureRegistry.Shared;
 
+        /// <summary>
+        /// Pixel density used by actors that do not set their own (output pixels per world unit). HD (2) by
+        /// default: twice the resolution with high density anatomy details. 1 restores classic sprites.
+        /// </summary>
+        public static double DefaultDensity { get; set; } = CreatureFramework.HdDensity;
+
         public static CreatureFactory Factory
         {
             get
@@ -40,6 +46,19 @@ namespace PixelCreatures.Runtime
         }
 
         /// <summary>Samples a new genome of a family from a seed (deterministic).</summary>
+        /// <summary>Short user facing name of a creation category.</summary>
+        public static string CategoryLabel(CreationCategory c) => c switch
+        {
+            CreationCategory.Mythical => "Mythical",
+            CreationCategory.Monster => "Monsters",
+            CreationCategory.Flora => "Flora",
+            CreationCategory.Prop => "Props",
+            _ => "Creatures",
+        };
+
+        /// <summary>Family name prefixed with its category, for pickers ("Flora: Trees & Flora").</summary>
+        public static string FamilyLabel(ICreatureFamily f) => $"{CategoryLabel(f.Category)}: {f.DisplayName}";
+
         public static CreatureGenome Sample(string familyId, ulong seed) => GenomeFactory.Sample(Registry.GetFamily(familyId), seed);
 
         /// <summary>Builds a model synchronously (cached).</summary>

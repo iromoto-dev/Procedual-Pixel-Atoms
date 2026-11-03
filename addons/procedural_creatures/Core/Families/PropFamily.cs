@@ -232,7 +232,6 @@ namespace PixelCreatures.Core.Families
             public int Root, Base, Top;
             public Rng Rng = null!;
             public double Wear, Ornament, Light, Count;
-            public double Top_;
         }
 
         public override CreatureAnatomy BuildAnatomy(CreatureGenome g, CreatureRegistry registry)

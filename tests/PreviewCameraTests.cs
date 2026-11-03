@@ -64,7 +64,9 @@ namespace PixelCreatures.Tests
                         ctx.Equal(position, actor.Position, $"{family.Id}: preview root drifted");
                         checkedFrames++;
                     }
-                    ctx.True(actor.GroundPosition.DistanceTo(start) > 1 && actor.RenderCount > renders + 10, $"{family.Id}: locomotion and rendering must continue with a fixed camera");
+                    // stationary creations (trees, plants, props) sway and act in place instead of walking
+                    bool stationary = actor.Model!.Anatomy.Rig.Stationary;
+                    ctx.True((stationary || actor.GroundPosition.DistanceTo(start) > 1) && actor.RenderCount > renders + 10, $"{family.Id}: locomotion and rendering must continue with a fixed camera");
                     stage.SetZoom(1);
                     var zoomedOut = stage.Viewport.Size;
                     stage.SetZoom(4);

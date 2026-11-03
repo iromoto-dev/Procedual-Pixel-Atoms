@@ -39,6 +39,37 @@ namespace PixelCreatures.Runtime
         [Export] public FacingMode Facing { get; set; } = FacingMode.Eight;
         [Export] public bool DrawShadow { get; set; } = true;
         [Export(PropertyHint.Range, "0,2")] public int Quality { get; set; } = 2;
+        /// <summary>
+        /// Output pixels per world unit: 2 = HD sprites with high density anatomy, 1 = classic. 0 or less uses
+        /// CreatureRuntime.DefaultDensity. Changing it re-creates the texture.
+        /// </summary>
+        [Export(PropertyHint.Range, "0,4,0.5")]
+        public float PixelDensity
+        {
+            get => _density;
+            set
+            {
+                if (Math.Abs(_density - value) < 1e-6) return;
+                _density = value;
+                if (Model != null) { SetCanvas(Model.Anatomy.Canvas.Scaled(EffectiveDensity)); RequestRender(); }
+            }
+        }
+        /// <summary>
+        /// true: the sprite is drawn at 1/density, so the creature keeps its world size and moves in world
+        /// units (games, the test area). false: one texel per unit, for pixel stages that zoom by themselves.
+        /// </summary>
+        [Export]
+        public bool ScaleToWorld
+        {
+            get => _scaleToWorld;
+            set { _scaleToWorld = value; ApplySpriteScale(); QueueRedraw(); }
+        }
+        /// <summary>The density actually used for rendering.</summary>
+        public double EffectiveDensity => _density > 0 ? Math.Max(1.0, _density) : Math.Max(1.0, CreatureRuntime.DefaultDensity);
+        /// <summary>Scale of node units to texture pixels (1 when the sprite is not scaled to the world).</summary>
+        public double DisplayScale => _scaleToWorld ? 1.0 / EffectiveDensity : 1.0;
+        /// <summary>Canvas of the current model at the effective density (texture pixels).</summary>
+        public CanvasSpec? RenderCanvas => _canvas;
         private bool _showRig, _showContacts;
         [Export] public bool ShowRig { get => _showRig; set { if (_showRig == value) return; _showRig = value; QueueRedraw(); } }
         [Export] public bool ShowContacts { get => _showContacts; set { if (_showContacts == value) return; _showContacts = value; QueueRedraw(); } }
@@ -91,6 +122,8 @@ namespace PixelCreatures.Runtime
         private byte[] _rgba = Array.Empty<byte>();
         private readonly byte[] _lut = new byte[256 * 4];
         private CanvasSpec? _canvas;
+        private float _density;
+        private bool _scaleToWorld = true;
         private readonly FixedClock _clock = new FixedClock();
         private readonly CreatureBuildRequester _requester = new CreatureBuildRequester();
         private double _sinceRender = 1e9;
@@ -122,6 +155,7 @@ namespace PixelCreatures.Runtime
             _sprite.TextureFilter = TextureFilterEnum.Nearest;
             // the debug overlays (_Draw of this node: rig, contacts, canvas) must stay above the sprite
             _sprite.ShowBehindParent = true;
+            ApplySpriteScale();
             _started = true;
             // actors placed in the editor start where they were placed
             if (GroundPosition == Vector2.Zero && Position != Vector2.Zero) GroundPosition = GodotConvert.ScreenToGround(Position);
@@ -207,7 +241,7 @@ namespace PixelCreatures.Runtime
             ContentExtent = Vector2I.Zero;
             _extentMin = new Vector2I(int.MaxValue, int.MaxValue);
             _extentMax = new Vector2I(int.MinValue, int.MinValue);
-            SetCanvas(model.Anatomy.Canvas);
+            SetCanvas(model.Anatomy.Canvas.Scaled(EffectiveDensity));
             _clock.Reset();
             _dirty = true;
             _needRaster = true;
@@ -219,6 +253,7 @@ namespace PixelCreatures.Runtime
         private void SetCanvas(CanvasSpec c)
         {
             _canvas = c;
+            ApplySpriteScale();
             if (_frame != null && _frame.Width == c.Width && _frame.Height == c.Height && _image != null && _texture != null)
             {
                 // same canvas size: keep buffers, image and texture (no engine allocations)
@@ -241,6 +276,13 @@ namespace PixelCreatures.Runtime
             // release the engine side of the replaced resources now instead of at the next GC
             oldTexture?.Dispose();
             oldImage?.Dispose();
+        }
+
+        private void ApplySpriteScale()
+        {
+            if (_sprite == null) return;
+            float s = (float)DisplayScale;
+            _sprite.Scale = new Vector2(s, s);
         }
 
         // ------------------------------------------------------------------ commands
@@ -342,6 +384,8 @@ namespace PixelCreatures.Runtime
             bool tick = steps > 0 && _sinceRender + 1e-9 >= frameInterval;
             Vector2 screen = GodotConvert.GroundToScreen(GroundPosition.X, GroundPosition.Y);
             if (SurfaceHeight != null) screen.Y -= SurfaceHeight(GroundPosition);
+            // node units are texture pixels when the sprite is not scaled to the world
+            if (!_scaleToWorld) screen *= (float)EffectiveDensity;
             Vector2 snapped = new Vector2(Mathf.Round(screen.X), Mathf.Round(screen.Y));
             bool moved = snapped != _snapped;
             if (SyncNodePosition && (!SteppedMovement || tick || _dirty)) Position = snapped;
@@ -389,7 +433,8 @@ namespace PixelCreatures.Runtime
 
         private bool CanvasOnScreen(CanvasSpec c)
         {
-            var local = new Rect2(-c.OriginX, -c.OriginY, c.Width, c.Height);
+            float k = (float)DisplayScale;
+            var local = new Rect2(-c.OriginX * k, -c.OriginY * k, c.Width * k, c.Height * k);
             var onCanvas = GetGlobalTransformWithCanvas() * local;
             return GetViewportRect().Grow(CullMargin).Intersects(onCanvas);
         }
@@ -400,8 +445,9 @@ namespace PixelCreatures.Runtime
             _renderPose.CopyFrom(Motor.Pose);
             double sinE = DMath.Sin(PixelCamera.DefaultElevation);
             double dx = exactScreen.X - _snapped.X, dy = exactScreen.Y - _snapped.Y;
-            _view = ViewSpec.Default(Motor.Yaw);
-            _view.RootOffset = new Vec3(dx, 0, dy / sinE);
+            _view = ViewSpec.Default(Motor.Yaw, EffectiveDensity);
+            double unit = _scaleToWorld ? 1.0 : EffectiveDensity;
+            _view.RootOffset = new Vec3(dx / unit, 0, dy / sinE / unit);
             _view.DrawShadow = DrawShadow;
             _view.Quality = Quality;
             _view.WaterLevel = WaterLevel;
@@ -452,8 +498,11 @@ namespace PixelCreatures.Runtime
             {
                 _extentMin = new Vector2I(Math.Min(_extentMin.X, x0 - _frame.OriginX), Math.Min(_extentMin.Y, y0 - _frame.OriginY));
                 _extentMax = new Vector2I(Math.Max(_extentMax.X, x1 - _frame.OriginX), Math.Max(_extentMax.Y, y1 - _frame.OriginY));
-                ContentExtent = _extentMax - _extentMin;
-                ContentCenter = new Vector2((_extentMin.X + _extentMax.X) * 0.5f, (_extentMin.Y + _extentMax.Y) * 0.5f);
+                // extents in node units (texture pixels times the display scale)
+                float k = (float)DisplayScale;
+                var ext = _extentMax - _extentMin;
+                ContentExtent = new Vector2I((int)Math.Ceiling(ext.X * k), (int)Math.Ceiling(ext.Y * k));
+                ContentCenter = new Vector2((_extentMin.X + _extentMax.X) * 0.5f * k, (_extentMin.Y + _extentMax.Y) * 0.5f * k);
             }
         }
 
@@ -465,10 +514,12 @@ namespace PixelCreatures.Runtime
             var pose = Motor.Pose;
             double yaw = Motor.Yaw;
             var off = _view.RootOffset;
+            // debug overlay in node units: world units scaled to texture pixels when the sprite is not scaled down
+            float unit = (float)(EffectiveDensity * DisplayScale);
             Vector2 P(Vec3 p)
             {
                 var s = PixelCamera.CreatureToScreen(p, yaw, PixelCamera.DefaultElevation, off);
-                return new Vector2((float)s.X, (float)s.Y);
+                return new Vector2((float)s.X, (float)s.Y) * unit;
             }
             if (ShowRig)
             {
@@ -488,7 +539,8 @@ namespace PixelCreatures.Runtime
                     var p = P(c.Position);
                     DrawRect(new Rect2(p - new Vector2(1, 1), new Vector2(2, 2)), c.Planted ? new Color(0.2f, 1f, 0.3f) : new Color(1f, 0.6f, 0.1f));
                 }
-                if (_canvas != null) DrawRect(new Rect2(-_canvas.OriginX, -_canvas.OriginY, _canvas.Width, _canvas.Height), new Color(1, 1, 0, 0.35f), false, 1f);
+                float k = (float)DisplayScale;
+                if (_canvas != null) DrawRect(new Rect2(-_canvas.OriginX * k, -_canvas.OriginY * k, _canvas.Width * k, _canvas.Height * k), new Color(1, 1, 0, 0.35f), false, 1f);
             }
         }
     }
