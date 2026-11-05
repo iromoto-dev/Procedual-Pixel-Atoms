@@ -1,4 +1,4 @@
-# Procedural Pixel Creatures
+# HD Procedural Pixel Creatures and Atoms
 
 ![100 procedurally generated creatures in a living landscape](.github/images/creatures.gif)
 
